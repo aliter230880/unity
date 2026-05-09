@@ -82,7 +82,7 @@ namespace UnityAIStudio
         private const string GEMINI_MODEL = "gemini-2.5-flash";
         private const string GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
         
-        private const string DEEPSEEK_API_KEY = "sk-0bf95b2295974143ac2a92d7932c0ab3";
+        private const string DEEPSEEK_API_KEY = "sk-c9f7b6c70e1b445680026c8ca46ed540";
         private const string DEEPSEEK_MODEL = "deepseek-chat";
         private const string DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
         
