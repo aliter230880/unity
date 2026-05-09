@@ -54,7 +54,7 @@ namespace AliTerra
     public class AliTerraAICoder : EditorWindow
     {
         // ── Server ────────────────────────────────────────────────────
-        private const string SERVER_URL     = "__SERVER_URL__";
+        private const string SERVER_URL     = "https://44c604d5-cbad-400c-8af7-eb2443eadba0-00-3vtnrupat6ost.riker.replit.dev";
         private const int    MAX_FILE_CHARS = 8000;
         private const int    MAX_REL_CHARS  = 2500;
         private const int    MAX_REL_COUNT  = 5;
