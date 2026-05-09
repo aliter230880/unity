@@ -78,16 +78,16 @@ namespace UnityAIStudio
         // ═══════════════════════════════════════════════════════════════
         // API KEYS - Auto-generated from web interface
         // ═══════════════════════════════════════════════════════════════
-        private const string GEMINI_API_KEY = "AIzaSyBqg_NXLMetxOArTLDvfJ0fDA7cHYz85Ok";
+        private const string GEMINI_API_KEY = "";
         private const string GEMINI_MODEL = "gemini-2.5-flash";
         private const string GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
         
-        private const string DEEPSEEK_API_KEY = "sk-c9f7b6c70e1b445680026c8ca46ed540";
+        private const string DEEPSEEK_API_KEY = "";
         private const string DEEPSEEK_MODEL = "deepseek-chat";
         private const string DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
         
         private const string GROQ_API_KEY = "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";
-        private const string GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+        private const string GROQ_MODEL = "llama-4-scout-17b-16e-instruct";
         private const string GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
         // ═══════════════════════════════════════════════════════════════
         
