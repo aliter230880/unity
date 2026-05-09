@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getFullPluginTemplate } from "./pluginTemplate";
 
 interface ApiProvider {
   id: string;
@@ -73,6 +74,7 @@ export default function App() {
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [downloadStatus, setDownloadStatus] = useState("");
 
   // Load from localStorage
   useEffect(() => {
@@ -224,14 +226,27 @@ private static string EscapeJson(string s)
   };
 
   const downloadPlugin = () => {
-    const code = generateCSharpCode();
-    const blob = new Blob([code], { type: "text/plain" });
+    const geminiKey = keys.gemini?.apiKey || "";
+    const geminiModel = keys.gemini?.model || "gemini-2.5-flash";
+    const deepseekKey = keys.deepseek?.apiKey || "";
+    const deepseekModel = keys.deepseek?.model || "deepseek-chat";
+    const groqKey = keys.groq?.apiKey || "";
+    const groqModel = keys.groq?.model || "llama-4-scout-17b-16e-instruct";
+
+    const template = getFullPluginTemplate(geminiKey, geminiModel, deepseekKey, deepseekModel, groqKey, groqModel);
+    
+    const blob = new Blob([template], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "AliTerraAI_Settings.cs";
+    a.download = "UnityAIStudio.cs";
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    setDownloadStatus("✅ Скачано!");
+    setTimeout(() => setDownloadStatus(""), 3000);
   };
 
   const testKey = async (providerId: string) => {
@@ -300,8 +315,8 @@ private static string EscapeJson(string s)
               <span className="text-xl">🤖</span>
             </div>
             <div>
-              <h1 className="text-lg font-bold text-white">AliTerra AI</h1>
-              <p className="text-xs text-slate-400">API Keys Manager</p>
+              <h1 className="text-lg font-bold text-white">Unity AI Studio Pro</h1>
+              <p className="text-xs text-slate-400">API Keys Manager для Unity Editor</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -490,9 +505,13 @@ private static string EscapeJson(string s)
               </button>
               <button
                 onClick={downloadPlugin}
-                className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-500 transition-colors"
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                  downloadStatus.includes("✅")
+                    ? "bg-emerald-500 text-white"
+                    : "bg-violet-600 text-white hover:bg-violet-500"
+                }`}
               >
-                ⬇️ Скачать .cs
+                {downloadStatus || "⬇️ Скачать UnityAIStudio.cs"}
               </button>
             </div>
           </div>
@@ -543,7 +562,7 @@ private static string EscapeJson(string s)
                 3
               </span>
               <span>
-                Скопируйте сгенерированный код или скачайте .cs файл
+                Нажмите <strong>"Скачать UnityAIStudio.cs"</strong> — плагин скачается с вашими ключами!
               </span>
             </li>
             <li className="flex gap-3">
@@ -551,13 +570,9 @@ private static string EscapeJson(string s)
                 4
               </span>
               <span>
-                Вставьте код в{" "}
+                Поместите файл в{" "}
                 <code className="px-1.5 py-0.5 rounded bg-slate-700 text-violet-300">
-                  AliTerraAI.cs
-                </code>{" "}
-                после строки с{" "}
-                <code className="px-1.5 py-0.5 rounded bg-slate-700 text-violet-300">
-                  SERVER_URL
+                  Assets/Editor/UnityAIStudio.cs
                 </code>
               </span>
             </li>
@@ -566,19 +581,36 @@ private static string EscapeJson(string s)
                 5
               </span>
               <span>
-                Откройте Unity → Window → AliTerra → AI Coder и используйте!
+                Откройте <strong>Unity → Window → AI Studio Pro</strong> (Ctrl+Shift+Q) и используйте!
               </span>
             </li>
           </ol>
+
+          {/* Features */}
+          <div className="mt-6 pt-4 border-t border-slate-700/50">
+            <h3 className="text-sm font-semibold text-white mb-3">🚀 Возможности плагина:</h3>
+            <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+              <div>💬 AI чат с 3 провайдерами</div>
+              <div>📁 Файловый менеджер</div>
+              <div>🔍 Анализ сцены и иерархии</div>
+              <div>📊 Анализ производительности</div>
+              <div>✏️ Встроенный редактор кода</div>
+              <div>🔎 Глобальный поиск</div>
+              <div>🔗 Анализ зависимостей</div>
+              <div>🔧 Batch инструменты</div>
+              <div>🐙 GitHub интеграция</div>
+              <div>⚡ Auto-apply режим</div>
+            </div>
+          </div>
         </section>
 
         {/* Footer */}
         <footer className="text-center py-6">
           <p className="text-xs text-slate-500">
-            AliTerra AI Coder v6 — Metaverse/P2E на Unity
+            Unity AI Studio Pro v1.0 — Полноценный AI-ассистент для Unity
           </p>
           <p className="text-[10px] text-slate-600 mt-1">
-            Ключи хранятся только в вашем браузере (localStorage)
+            Ключи хранятся только в вашем браузере (localStorage) и встраиваются в скачиваемый файл
           </p>
         </footer>
       </main>
