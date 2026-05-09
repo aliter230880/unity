@@ -78,7 +78,7 @@ namespace UnityAIStudio
         // ═══════════════════════════════════════════════════════════════
         // API KEYS - Auto-generated from web interface
         // ═══════════════════════════════════════════════════════════════
-        private const string GEMINI_API_KEY = "AIzaSyC0zIacbiLc9uJUVwznrEo-dufYvb7l48I";
+        private const string GEMINI_API_KEY = "AIzaSyBqg_NXLMetxOArTLDvfJ0fDA7cHYz85Ok";
         private const string GEMINI_MODEL = "gemini-2.5-flash";
         private const string GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
         
