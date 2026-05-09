@@ -86,7 +86,7 @@ namespace UnityAIStudio
         private const string DEEPSEEK_MODEL = "deepseek-chat";
         private const string DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
         
-        private const string GROQ_API_KEY = "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";
+        private const string GROQ_API_KEY = "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";
         private const string GROQ_MODEL = "llama-4-scout-17b-16e-instruct";
         private const string GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
         // ═══════════════════════════════════════════════════════════════
