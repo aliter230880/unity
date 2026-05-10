@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns="UnityEngine.UIElements" editor-extension-mode="False">
+    <ui:VisualElement name="askUserRoot" class="ask-user-root">
+        <ui:VisualElement name="askUserTabContent" class="ask-user-tab-content" />
+        <ui:VisualElement name="askUserButtonRow" class="ask-user-button-row">
+            <ui:Button name="askUserCancelButton" text="Cancel" class="ask-user-cancel-button" />
+            <ui:Button name="askUserContinueButton" text="Continue" class="ask-user-continue-button" />
+            <ui:Button name="askUserSubmitButton" text="Submit" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

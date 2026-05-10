@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <ui:VisualElement class="ask-user-question-container">
+        <ui:Label name="questionLabel" class="ask-user-question-label"/>
+        <ui:VisualElement name="questionContent"/>
+    </ui:VisualElement>
+</ui:UXML>
