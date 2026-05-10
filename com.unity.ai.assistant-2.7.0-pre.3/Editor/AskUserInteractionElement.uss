@@ -1,0 +1,113 @@
+.ask-user-root {
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.ask-user-tab-content {
+    flex-grow: 1;
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.ask-user-tab-pane {
+    display: none;
+}
+
+.ask-user-tab-pane-active {
+    display: flex;
+}
+
+.ask-user-header-chip {
+    font-size: 10px;
+    color: var(--muse-chat-text-primary);
+    background-color: var(--muse-chat-backgrounds-100);
+    padding: 2px 8px;
+    border-radius: 10px;
+    align-self: flex-start;
+    margin-bottom: 6px;
+}
+
+.ask-user-question-label {
+    -unity-font-style: bold;
+    white-space: normal;
+    margin-bottom: 10px;
+}
+
+.ask-user-question-container {
+    padding: 0;
+}
+
+.ask-user-option-row {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 5px 0;
+}
+
+.ask-user-radio-indicator {
+    margin-right: 8px;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.ask-user-option-text-column {
+    flex-direction: column;
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.ask-user-option-description {
+    font-size: 10px;
+    opacity: 0.6;
+    white-space: normal;
+    margin-top: 2px;
+}
+
+.ask-user-other-inline-field {
+    flex-grow: 1;
+    flex-shrink: 1;
+    overflow: visible;
+}
+
+.ask-user-other-inline-field .unity-base-text-field__input {
+    margin-left: -3px;
+}
+
+.ask-user-other-field-placeholder {
+    opacity: 0.45;
+}
+
+.ask-user-other-field-row {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+.ask-user-other-save-btn {
+    margin-left: 6px;
+    padding: 2px 10px;
+    flex-shrink: 0;
+}
+
+.ask-user-text-field {
+    height: 60px;
+    margin-top: 4px;
+}
+
+.ask-user-button-row {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.ask-user-cancel-button {
+    margin-right: 8px;
+}
+
+.ask-user-continue-button {
+    margin-right: 8px;
+}
+
+
+.ask-user-save-btn--saved {
+    opacity: 0.5;
+}
