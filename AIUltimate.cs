@@ -52,7 +52,7 @@ namespace UnityAIUltimate
         const string GM = "gemini-2.5-flash";
         const string DK = "sk-..."; // DeepSeek
         const string DM = "deepseek-chat";
-        const string RK = "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"; // Groq
+        const string RK = "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"; // Groq
         const string RM = "llama-3.3-70b-versatile";
         
         Provider prov = Provider.Groq;
