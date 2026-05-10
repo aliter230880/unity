@@ -1,0 +1,122 @@
+.plan-review-container {
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: var(--unity-colors-inspector_titlebar-border);
+    margin-bottom: 12px;
+}
+
+.plan-review-topbar {
+    flex-direction: row;
+    align-items: center;
+    padding: 2px 4px 2px 8px;
+    background-color: var(--unity-colors-alternated_rows-background);
+    border-bottom-width: 1px;
+    border-bottom-color: var(--unity-colors-inspector_titlebar-border);
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+.plan-review-plan-icon {
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+    flex-shrink: 0;
+    align-self: center;
+    background-image: url('project://database/Packages/com.unity.ai.assistant/Editor/UI/Assets/icons/ListChecks.png');
+    -unity-background-image-tint-color: var(--muse-chat-text-primary);
+}
+
+.plan-review-title {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: var(--muse-chat-text-primary);
+    flex-grow: 1;
+}
+
+.plan-review-content {
+    background-color: var(--muse-chat-backgrounds-100);
+    max-height: 300px;
+}
+
+.plan-review-content .unity-scroll-view__content-container {
+    padding: 8px;
+}
+
+.plan-review-copy-btn {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    padding: 2px;
+    margin: 0;
+    border-width: 0;
+    background-color: transparent;
+    border-radius: 3px;
+    flex-shrink: 0;
+    align-self: center;
+    justify-content: center;
+    align-items: center;
+}
+
+.plan-review-copy-icon {
+    width: 18px;
+    height: 18px;
+    background-image: url('project://database/Packages/com.unity.ai.assistant/Editor/UI/Assets/icons/Copy.png');
+    -unity-background-image-tint-color: var(--muse-chat-text-primary);
+}
+
+.plan-review-copy-btn:hover {
+    background-color: var(--muse-chat-foregrounds-320);
+}
+
+.exit-plan-feedback-placeholder .unity-text-element {
+    color: var(--muse-chat-text-secondary);
+}
+
+.exitplanmodeinteractionelement__element {
+    flex-shrink: 0;
+}
+
+.plan-review-root {
+    flex-direction: column;
+}
+
+.plan-review-heading {
+    font-size: 14px;
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+}
+
+.plan-review-path-label {
+    margin-bottom: 8px;
+}
+
+.plan-review-feedback-label {
+    margin-bottom: 4px;
+}
+
+.plan-review-feedback-field {
+    height: 60px;
+    margin-bottom: 12px;
+    overflow: visible;
+}
+
+.plan-review-feedback-field .unity-base-text-field__input {
+    margin-left: -3px;
+}
+
+.plan-review-button-row {
+    flex-direction: row;
+    justify-content: flex-end;
+}
+
+.plan-review-cancel-btn {
+    margin-right: 8px;
+}
+
+.plan-review-feedback-btn {
+    margin-right: 8px;
+}
+
+.plan-review-copy-btn--copied .plan-review-copy-icon {
+    background-image: url('project://database/Packages/com.unity.ai.assistant/Editor/UI/Assets/icons/Checkmark.png');
+}
