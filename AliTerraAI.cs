@@ -112,6 +112,8 @@ namespace AliTerra
 
         // ── EditorPrefs ─────────────────────────────────────────────────
         private const string PREF_SERVER_URL = "AliTerra_ServerUrl";
+        private const string PREF_AI_MODEL  = "AliTerra_Model";
+        private const string PREF_INPUT_H   = "AliTerra_InputH";
         private const string PREF_GH_TOKEN  = "AliTerra_GH_Token";
         private const string PREF_GH_OWNER  = "AliTerra_GH_Owner";
         private const string PREF_GH_REPO   = "AliTerra_GH_Repo";
@@ -125,12 +127,32 @@ namespace AliTerra
         private string statusMsg = "";
 
         // ── Chat ────────────────────────────────────────────────────────
-        private List<ChatMsg> history      = new List<ChatMsg>();
-        private string        userInput    = "";
-        private Vector2       chatScroll;
-        private int           pendingIndex = -1;
-        private int           retryCount   = 0;
-        private string        lastJson     = "";
+        private List<ChatMsg>   history         = new List<ChatMsg>();
+        private string          userInput       = "";
+        private Vector2         chatScroll;
+        private int             pendingIndex    = -1;
+        private int             retryCount      = 0;
+        private string          lastJson        = "";
+        private bool            cancelRequested = false;
+        private UnityWebRequest chatRequest     = null;
+
+        // ── AI Model ─────────────────────────────────────────────────────
+        private string   aiModel      = "claude-sonnet-4-6";
+        private int      modelIndex   = 0;
+        private bool     showModelPick = false;
+        private static readonly string[] PRESET_MODELS = new string[]
+        {
+            "claude-sonnet-4-6",
+            "claude-opus-4-5",
+            "claude-haiku-4-5",
+            "claude-3-7-sonnet-20250219",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "custom..."
+        };
+
+        // ── Input area ───────────────────────────────────────────────────
+        private float   inputAreaHeight = 80f;
 
         // ── Auto-apply ──────────────────────────────────────────────────
         private bool autoApply = false;
@@ -232,6 +254,13 @@ namespace AliTerra
                 serverUrl = DEFAULT_URL;
             // else: user needs to type it in the Fullstack tab
 
+            // Load AI model
+            aiModel       = EditorPrefs.GetString(PREF_AI_MODEL, "claude-sonnet-4-6");
+            inputAreaHeight = EditorPrefs.GetFloat(PREF_INPUT_H, 80f);
+            modelIndex    = 0;
+            for (int k = 0; k < PRESET_MODELS.Length - 1; k++)
+                if (PRESET_MODELS[k] == aiModel) { modelIndex = k; break; }
+
             autoApply = EditorPrefs.GetBool(PREF_AUTO, false);
             polling   = EditorPrefs.GetBool(PREF_POLLING, false);
             ghToken   = EditorPrefs.GetString(PREF_GH_TOKEN, "");
@@ -268,12 +297,14 @@ namespace AliTerra
         void OnDisable()
         {
             EditorPrefs.SetString(PREF_SERVER_URL, serverUrl);
-            EditorPrefs.SetBool(PREF_AUTO, autoApply);
-            EditorPrefs.SetBool(PREF_POLLING, polling);
-            EditorPrefs.SetString(PREF_GH_TOKEN, ghToken);
-            EditorPrefs.SetString(PREF_GH_OWNER, ghOwner);
-            EditorPrefs.SetString(PREF_GH_REPO, ghRepo);
-            EditorPrefs.SetString(PREF_GH_BRANCH, ghBranch);
+            EditorPrefs.SetString(PREF_AI_MODEL,   aiModel);
+            EditorPrefs.SetFloat (PREF_INPUT_H,    inputAreaHeight);
+            EditorPrefs.SetBool  (PREF_AUTO,        autoApply);
+            EditorPrefs.SetBool  (PREF_POLLING,     polling);
+            EditorPrefs.SetString(PREF_GH_TOKEN,    ghToken);
+            EditorPrefs.SetString(PREF_GH_OWNER,    ghOwner);
+            EditorPrefs.SetString(PREF_GH_REPO,     ghRepo);
+            EditorPrefs.SetString(PREF_GH_BRANCH,   ghBranch);
 
             EditorApplication.update -= Tick;
 
@@ -1007,20 +1038,33 @@ namespace AliTerra
                 sb.Append("\"");
             }
 
+            sb.Append(",\"model\":\""); sb.Append(EscapeJson(aiModel)); sb.Append("\"");
             sb.Append("}}");
             return sb.ToString();
         }
 
         IEnumerator SendChatRoutine(string json)
         {
-            bool success = false;
+            cancelRequested = false;
+            bool   success      = false;
             string responseText = "";
 
-            yield return SendPostRoutine(serverUrl + "/api/ai/chat", json, (ok, text) =>
+            // Inline HTTP so we can store and abort the request
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            chatRequest = new UnityWebRequest(serverUrl + "/api/ai/chat", "POST");
+            chatRequest.uploadHandler   = new UploadHandlerRaw(bytes);
+            chatRequest.downloadHandler = new DownloadHandlerBuffer();
+            chatRequest.SetRequestHeader("Content-Type", "application/json");
+            chatRequest.timeout = 180;
+            yield return chatRequest.SendWebRequest();
+
+            if (!cancelRequested && chatRequest != null)
             {
-                success      = ok;
-                responseText = text;
-            });
+                success      = chatRequest.result == UnityWebRequest.Result.Success;
+                responseText = success ? chatRequest.downloadHandler.text : chatRequest.error;
+            }
+            if (chatRequest != null) { try { chatRequest.Dispose(); } catch { } chatRequest = null; }
+            if (cancelRequested) yield break;
 
             isBusy = false;
 
@@ -1404,11 +1448,14 @@ namespace AliTerra
         // ── Tab 0: Chat ─────────────────────────────────────────────────
         void DrawChatTab()
         {
-            // Context mini bar
+            // ── Context bar ────────────────────────────────────────────
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             if (selectedFile != null)
             {
-                EditorGUILayout.LabelField("📜 " + selectedFile.fileName + "  (" + fileContent.Length + " симв.)", EditorStyles.boldLabel);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("📜 " + selectedFile.fileName + "  (" + fileContent.Length + " симв.)", EditorStyles.boldLabel, GUILayout.ExpandWidth(true));
+                if (GUILayout.Button("✖", EditorStyles.miniButton, GUILayout.Width(22))) { selectedFile = null; fileContent = ""; }
+                EditorGUILayout.EndHorizontal();
                 EditorGUILayout.LabelField(selectedFile.assetPath, EditorStyles.miniLabel);
             }
             else if (!string.IsNullOrEmpty(ctxObject))
@@ -1420,35 +1467,86 @@ namespace AliTerra
                 EditorGUILayout.LabelField("⚠️ Выбери .cs файл в Project или GameObject в Hierarchy", EditorStyles.wordWrappedMiniLabel);
             }
 
+            // ── Toolbar row ────────────────────────────────────────────
             EditorGUILayout.BeginHorizontal();
-            autoApply = EditorGUILayout.ToggleLeft("⚡ Авто-применить", autoApply, GUILayout.Width(140));
+            autoApply = EditorGUILayout.ToggleLeft("⚡ Авто", autoApply, GUILayout.Width(70));
+
+            // Model button
+            Color oldC = GUI.color;
+            GUI.color = showModelPick ? Color.yellow : Color.white;
+            string modelShort = aiModel.Replace("claude-", "").Replace("-20250219","").Replace("-20241022","");
+            if (GUILayout.Button("🤖 " + modelShort, EditorStyles.miniButton, GUILayout.Width(130)))
+                showModelPick = !showModelPick;
+            GUI.color = oldC;
+
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("🗑 Очистить чат", EditorStyles.miniButton, GUILayout.Width(110)))
+            if (GUILayout.Button("🗑 Очистить", EditorStyles.miniButton, GUILayout.Width(80)))
             {
                 history.Clear();
                 pendingIndex = -1;
+                statusMsg    = "";
             }
             EditorGUILayout.EndHorizontal();
+
+            // ── Model picker (collapsible) ─────────────────────────────
+            if (showModelPick)
+            {
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.LabelField("🤖 Выбор модели AI", EditorStyles.boldLabel);
+
+                int newIdx = EditorGUILayout.Popup(modelIndex, PRESET_MODELS);
+                if (newIdx != modelIndex)
+                {
+                    modelIndex = newIdx;
+                    if (modelIndex < PRESET_MODELS.Length - 1)
+                    {
+                        aiModel = PRESET_MODELS[modelIndex];
+                        EditorPrefs.SetString(PREF_AI_MODEL, aiModel);
+                    }
+                }
+                if (modelIndex == PRESET_MODELS.Length - 1)
+                {
+                    string custom = EditorGUILayout.TextField("Модель:", aiModel);
+                    if (custom != aiModel)
+                    {
+                        aiModel = custom.Trim();
+                        EditorPrefs.SetString(PREF_AI_MODEL, aiModel);
+                    }
+                }
+                EditorGUILayout.LabelField("Текущая: " + aiModel, EditorStyles.miniLabel);
+                EditorGUILayout.EndVertical();
+            }
             EditorGUILayout.EndVertical();
 
-            // Chat history
+            // ── Chat history ───────────────────────────────────────────
             chatScroll = EditorGUILayout.BeginScrollView(chatScroll, GUILayout.ExpandHeight(true));
 
             for (int i = 0; i < history.Count; i++)
             {
                 ChatMsg m = history[i];
                 EditorGUILayout.BeginHorizontal();
-                if (m.isUser) GUILayout.Space(40);
+                if (m.isUser) GUILayout.Space(30);
 
                 EditorGUILayout.BeginVertical();
-                GUILayout.Label(m.isUser ? "Ты" : "🤖 AI", EditorStyles.miniLabel);
+
+                // Label row
+                EditorGUILayout.BeginHorizontal();
+                Color lc = GUI.color;
+                GUI.color = m.isUser ? new Color(0.6f, 0.9f, 1f) : new Color(0.7f, 1f, 0.7f);
+                GUILayout.Label(m.isUser ? "👤 Ты" : "🤖 AI [" + modelShort + "]", EditorStyles.miniLabel);
+                GUI.color = lc;
+                if (!m.isPending && !m.isUser)
+                {
+                    if (GUILayout.Button("📋", EditorStyles.miniButton, GUILayout.Width(24)))
+                        EditorGUIUtility.systemCopyBuffer = m.text;
+                }
+                EditorGUILayout.EndHorizontal();
 
                 if (m.isPending)
                 {
                     double elapsed = EditorApplication.timeSinceStartup - m.startTime;
                     int    dots    = ((int)(elapsed * 2)) % 4;
-                    string dotStr  = new string('.', dots);
-                    string spinner = "⏳ Думаю" + dotStr + " (" + (int)elapsed + "s)";
+                    string spinner = "⏳ Думаю" + new string('.', dots) + " (" + (int)elapsed + "s)";
                     EditorGUILayout.HelpBox(spinner, MessageType.Info);
                     Repaint();
                 }
@@ -1459,11 +1557,11 @@ namespace AliTerra
                     if (!string.IsNullOrEmpty(m.code))
                     {
                         EditorGUILayout.BeginHorizontal();
-                        GUILayout.Label("📜 Код", EditorStyles.miniLabel);
+                        GUILayout.Label("📜 Код (" + m.code.Length + " симв.)", EditorStyles.miniLabel);
                         GUILayout.FlexibleSpace();
                         if (GUILayout.Button("📋 Копировать", EditorStyles.miniButton, GUILayout.Width(90)))
                             EditorGUIUtility.systemCopyBuffer = m.code;
-                        if (selectedFile != null && GUILayout.Button("✅ Записать в файл", EditorStyles.miniButton, GUILayout.Width(120)))
+                        if (selectedFile != null && GUILayout.Button("✅ Записать", EditorStyles.miniButton, GUILayout.Width(80)))
                             ApplyCode(m.code, selectedFile.assetPath);
                         EditorGUILayout.EndHorizontal();
 
@@ -1474,41 +1572,86 @@ namespace AliTerra
                         if (!string.IsNullOrEmpty(ghToken) && selectedFile != null)
                         {
                             if (GUILayout.Button("📤 Push to GitHub", EditorStyles.miniButton, GUILayout.Width(130)))
-                            {
-                                string rel = selectedFile.assetPath.Replace("\\", "/");
-                                PushToGitHub(rel, m.code);
-                            }
+                                PushToGitHub(selectedFile.assetPath.Replace("\\", "/"), m.code);
                         }
                     }
                 }
                 EditorGUILayout.EndVertical();
-                if (!m.isUser) GUILayout.Space(40);
+                if (!m.isUser) GUILayout.Space(30);
                 EditorGUILayout.EndHorizontal();
-                GUILayout.Space(3);
+                GUILayout.Space(4);
             }
 
             EditorGUILayout.EndScrollView();
-            if (Event.current.type == EventType.Repaint) chatScroll.y = float.MaxValue;
+            if (Event.current.type == EventType.Repaint && !isBusy) chatScroll.y = float.MaxValue;
 
             if (!string.IsNullOrEmpty(statusMsg))
                 EditorGUILayout.HelpBox(statusMsg, isBusy ? MessageType.Info : MessageType.None);
 
-            // Input area
+            // ── Input area ─────────────────────────────────────────────
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            GUI.SetNextControlName("chatInput");
-            userInput = EditorGUILayout.TextArea(userInput, GUILayout.MinHeight(54), GUILayout.ExpandWidth(true));
 
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
+            // Quick prompt buttons
             if (selectedFile != null)
             {
-                if (GUILayout.Button("🔧 Исправь ошибки", GUILayout.Width(130))) { userInput = "Найди и исправь все ошибки в этом скрипте"; SendMessage(); }
-                if (GUILayout.Button("📖 Объясни", GUILayout.Width(75))) { userInput = "Объясни что делает этот код"; SendMessage(); }
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("🔧 Исправь ошибки", EditorStyles.miniButton))
+                    { userInput = "Найди и исправь все ошибки в этом скрипте"; SendMessage(); }
+                if (GUILayout.Button("📖 Объясни код", EditorStyles.miniButton))
+                    { userInput = "Объясни что делает этот код"; SendMessage(); }
+                if (GUILayout.Button("⚡ Оптимизируй", EditorStyles.miniButton))
+                    { userInput = "Оптимизируй этот код для лучшей производительности"; SendMessage(); }
+                EditorGUILayout.EndHorizontal();
             }
+
+            // TextArea
+            GUI.SetNextControlName("chatInput");
+            userInput = EditorGUILayout.TextArea(
+                userInput,
+                GUILayout.MinHeight(inputAreaHeight),
+                GUILayout.MaxHeight(inputAreaHeight),
+                GUILayout.ExpandWidth(true));
+
+            // Send row
+            EditorGUILayout.BeginHorizontal();
+
+            // Height controls
+            EditorGUILayout.LabelField("↕ " + (int)inputAreaHeight + "px", EditorStyles.miniLabel, GUILayout.Width(52));
+            if (GUILayout.Button("▼", EditorStyles.miniButton, GUILayout.Width(22)))
+            {
+                inputAreaHeight = Mathf.Max(40f, inputAreaHeight - 20f);
+                EditorPrefs.SetFloat(PREF_INPUT_H, inputAreaHeight);
+            }
+            if (GUILayout.Button("▲", EditorStyles.miniButton, GUILayout.Width(22)))
+            {
+                inputAreaHeight = Mathf.Min(300f, inputAreaHeight + 20f);
+                EditorPrefs.SetFloat(PREF_INPUT_H, inputAreaHeight);
+            }
+
+            GUILayout.FlexibleSpace();
+
+            // Stop button
+            if (isBusy)
+            {
+                Color sc = GUI.color;
+                GUI.color = new Color(1f, 0.4f, 0.4f);
+                if (GUILayout.Button("⛔ Стоп", GUILayout.Width(75)))
+                    StopRequest();
+                GUI.color = sc;
+            }
+
+            // Send button
             GUI.enabled = !isBusy && !string.IsNullOrEmpty(userInput.Trim());
-            if (GUILayout.Button(isBusy ? "⏳..." : "▶ Send", GUILayout.Width(70))) SendMessage();
+            Color bc = GUI.color;
+            if (!isBusy) GUI.color = new Color(0.6f, 1f, 0.6f);
+            if (GUILayout.Button(isBusy ? "⏳ Ждите..." : "▶ Отправить", GUILayout.Width(100)))
+                SendMessage();
+            GUI.color = bc;
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
+
+            // Hint
+            EditorGUILayout.LabelField("Shift+Enter — отправить", EditorStyles.centeredGreyMiniLabel);
             EditorGUILayout.EndVertical();
 
             if (Event.current.type == EventType.KeyDown && Event.current.shift && Event.current.keyCode == KeyCode.Return)
@@ -1519,6 +1662,30 @@ namespace AliTerra
                     Event.current.Use();
                 }
             }
+        }
+
+        void StopRequest()
+        {
+            cancelRequested = true;
+            try
+            {
+                if (chatRequest != null)
+                {
+                    chatRequest.Abort();
+                    chatRequest.Dispose();
+                    chatRequest = null;
+                }
+            }
+            catch { }
+
+            isBusy    = false;
+            statusMsg = "";
+
+            if (pendingIndex >= 0 && pendingIndex < history.Count)
+                history[pendingIndex] = new ChatMsg { text = "⛔ Запрос остановлен пользователем", isUser = false };
+
+            pendingIndex = -1;
+            Repaint();
         }
 
         // ── Tab 1: Fullstack ────────────────────────────────────────────
