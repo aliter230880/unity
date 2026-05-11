@@ -1,0 +1,6 @@
+{
+  "name": "Unity AI Studio",
+  "description": "Professional AI-powered development environment for Unity creators. Generate scripts, shaders, and manage scenes with an integrated AI agent.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI Assistant", "Unity Development", "Code Generation"]
+}
