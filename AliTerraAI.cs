@@ -1113,9 +1113,29 @@ namespace AliTerra
             if (hasCode && !string.IsNullOrEmpty(code))
                 display = Regex.Replace(display, @"```[\s\S]*?```", "[📜 код ниже]").Trim();
 
+            // Extract tool names used
+            string toolNames = "";
+            MatchCollection toolMatches = Regex.Matches(json, "\"tool\"\\s*:\\s*\"([^\"]+)\"");
+            if (toolMatches.Count > 0)
+            {
+                StringBuilder tnb = new StringBuilder();
+                HashSet<string> seen = new HashSet<string>();
+                foreach (Match tm in toolMatches)
+                {
+                    string tn = tm.Groups[1].Value;
+                    if (!seen.Contains(tn)) { seen.Add(tn); if (tnb.Length > 0) tnb.Append(", "); tnb.Append(tn); }
+                }
+                toolNames = tnb.ToString();
+                AddCommandLog("🔧 AI использовал: " + toolNames);
+            }
+
             string suffix = "";
-            if (toolCount > 0)   suffix += "\n\n🔧 Использовано инструментов: " + toolCount;
-            if (pending > 0)     suffix += "\n⏳ Команд в очереди: " + pending + " (включи polling)";
+            if (toolCount > 0)
+            {
+                suffix += "\n\n🔧 Инструментов вызвано: " + toolCount;
+                if (!string.IsNullOrEmpty(toolNames)) suffix += " (" + toolNames + ")";
+            }
+            if (pending > 0)     suffix += "\n⏳ Команд в очереди: " + pending;
 
             if (pendingIndex >= 0 && pendingIndex < history.Count)
             {
@@ -1412,23 +1432,31 @@ namespace AliTerra
             GUILayout.Label("🤖 AliTerra AI v7", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
 
-            // Sync indicator
             Color old = GUI.color;
-            bool  syncOk = lastSyncTime > 0 && syncFileCount > 0;
+
+            // Sync indicator
+            bool syncOk = lastSyncTime > 0 && syncFileCount > 0;
             GUI.color = syncOk ? Color.cyan : Color.gray;
             GUILayout.Label(syncOk ? "⚡ " + syncFileCount + " файлов" : "⚡ нет синхр.", EditorStyles.miniLabel);
             GUI.color = old;
 
-            // Polling indicator
-            GUI.color = polling ? Color.green : Color.gray;
-            GUILayout.Label(polling ? "● polling" : "○ polling", EditorStyles.miniLabel);
+            GUILayout.Space(4);
+
+            // ── POLLING TOGGLE BUTTON (always visible in header) ───────
+            GUI.color = polling ? new Color(0.4f, 1f, 0.4f) : new Color(1f, 0.6f, 0.6f);
+            if (GUILayout.Button(polling ? "● POLLING ON" : "○ POLLING OFF", EditorStyles.toolbarButton, GUILayout.Width(110)))
+            {
+                polling = !polling;
+                EditorPrefs.SetBool(PREF_POLLING, polling);
+                AddCommandLog(polling ? "▶ Polling включён" : "■ Polling выключён");
+            }
             GUI.color = old;
 
-            // Pending commands
+            // Pending commands badge
             if (pendingCmds > 0)
             {
                 GUI.color = Color.yellow;
-                GUILayout.Label("⏳ " + pendingCmds, EditorStyles.miniLabel);
+                GUILayout.Label("⏳ " + pendingCmds + " cmd", EditorStyles.miniLabel, GUILayout.Width(55));
                 GUI.color = old;
             }
             EditorGUILayout.EndHorizontal();
@@ -1585,8 +1613,8 @@ namespace AliTerra
             EditorGUILayout.EndScrollView();
             if (Event.current.type == EventType.Repaint && !isBusy) chatScroll.y = float.MaxValue;
 
-            if (!string.IsNullOrEmpty(statusMsg))
-                EditorGUILayout.HelpBox(statusMsg, isBusy ? MessageType.Info : MessageType.None);
+            // ── Activity / Status panel ────────────────────────────────
+            DrawActivityPanel();
 
             // ── Input area ─────────────────────────────────────────────
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -1686,6 +1714,102 @@ namespace AliTerra
 
             pendingIndex = -1;
             Repaint();
+        }
+
+        // ── Activity panel (shown in Chat tab) ─────────────────────────
+        void DrawActivityPanel()
+        {
+            bool hasCmdLog   = commandLog.Count > 0;
+            bool hasPending  = pendingCmds > 0;
+            bool hasStatus   = !string.IsNullOrEmpty(statusMsg);
+
+            if (!isBusy && !hasCmdLog && !hasPending && !hasStatus) return;
+
+            Color old = GUI.color;
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            // ── Busy / AI progress ─────────────────────────────────────
+            if (isBusy)
+            {
+                double elapsed = 0;
+                for (int i = 0; i < history.Count; i++)
+                    if (history[i].isPending) { elapsed = EditorApplication.timeSinceStartup - history[i].startTime; break; }
+
+                EditorGUILayout.BeginHorizontal();
+                GUI.color = new Color(1f, 0.9f, 0.4f);
+                int dots = ((int)(EditorApplication.timeSinceStartup * 3)) % 4;
+                GUILayout.Label("⏳ AI работает" + new string('.', dots) + " (" + (int)elapsed + "s)", EditorStyles.boldLabel);
+                GUI.color = old;
+                GUILayout.FlexibleSpace();
+                GUI.color = new Color(1f, 0.4f, 0.4f);
+                if (GUILayout.Button("⛔ Стоп", EditorStyles.miniButton, GUILayout.Width(65))) StopRequest();
+                GUI.color = old;
+                EditorGUILayout.EndHorizontal();
+                Repaint();
+            }
+
+            // ── Generic status message ─────────────────────────────────
+            if (hasStatus)
+            {
+                bool isErr = statusMsg.StartsWith("❌");
+                GUI.color = isErr ? new Color(1f, 0.5f, 0.5f) : Color.white;
+                EditorGUILayout.LabelField(statusMsg, EditorStyles.wordWrappedMiniLabel);
+                GUI.color = old;
+            }
+
+            // ── Pending commands warning ───────────────────────────────
+            if (hasPending)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUI.color = Color.yellow;
+                GUILayout.Label("⏳ " + pendingCmds + " команд ждут исполнения", EditorStyles.boldLabel, GUILayout.ExpandWidth(true));
+                GUI.color = old;
+                if (!polling)
+                {
+                    GUI.color = new Color(0.4f, 1f, 0.4f);
+                    if (GUILayout.Button("▶ Включить Polling", EditorStyles.miniButton, GUILayout.Width(130)))
+                    {
+                        polling = true;
+                        EditorPrefs.SetBool(PREF_POLLING, true);
+                        AddCommandLog("▶ Polling включён (автоматически)");
+                    }
+                    GUI.color = old;
+                }
+                else
+                {
+                    GUI.color = Color.green;
+                    GUILayout.Label("● Polling ON", EditorStyles.miniLabel, GUILayout.Width(80));
+                    GUI.color = old;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            // ── Recent command log ─────────────────────────────────────
+            if (hasCmdLog)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("📋 Последние действия:", EditorStyles.miniLabel);
+                if (GUILayout.Button("Все →", EditorStyles.miniButton, GUILayout.Width(50)))
+                    activeTab = 1; // jump to Fullstack tab
+                if (GUILayout.Button("🗑", EditorStyles.miniButton, GUILayout.Width(22)))
+                    commandLog.Clear();
+                EditorGUILayout.EndHorizontal();
+
+                int show = Mathf.Min(5, commandLog.Count);
+                for (int i = 0; i < show; i++)
+                {
+                    string entry = commandLog[i];
+                    bool isOk  = entry.Contains("✅");
+                    bool isErr = entry.Contains("❌");
+                    GUI.color = isErr ? new Color(1f, 0.5f, 0.5f)
+                               : isOk ? new Color(0.6f, 1f, 0.6f)
+                               : Color.white;
+                    EditorGUILayout.LabelField(entry, EditorStyles.wordWrappedMiniLabel);
+                    GUI.color = old;
+                }
+            }
+
+            EditorGUILayout.EndVertical();
         }
 
         // ── Tab 1: Fullstack ────────────────────────────────────────────
