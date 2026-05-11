@@ -32,7 +32,7 @@ export const PROVIDERS = {
   groq: {
     name: "Groq (FREE)",
     baseUrl: "https://api.groq.com/openai/v1",
-    models: ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
     supportsToolUse: true,
   },
   ollama: {

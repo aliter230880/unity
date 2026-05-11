@@ -83,11 +83,18 @@ export async function POST(req: NextRequest) {
       if (msg.role === "user") {
         chatMessages.push({ role: "user", content: msg.content || "" });
       } else if (msg.role === "assistant") {
-        chatMessages.push({
+        // Groq/OpenAI require: if tool_calls exists, content can be null or string
+        // if tool_calls doesn't exist, content must be string and tool_calls should not be present
+        const assistantMsg: any = {
           role: "assistant",
-          content: msg.content || null,
-          tool_calls: msg.toolCalls as any,
-        });
+          content: msg.content || "",
+        };
+        // Only add tool_calls if they exist and are not null
+        if (msg.toolCalls && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0) {
+          assistantMsg.tool_calls = msg.toolCalls;
+          assistantMsg.content = msg.content || null;
+        }
+        chatMessages.push(assistantMsg);
       } else if (msg.role === "tool") {
         chatMessages.push({
           role: "tool",

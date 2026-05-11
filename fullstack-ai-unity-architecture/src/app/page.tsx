@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { UnityDashboard } from "@/components/UnityDashboard";
+import { SettingsModal } from "@/components/SettingsModal";
 
 interface Message {
   id: string;
@@ -28,7 +29,7 @@ interface Project {
 const AI_PROVIDERS = {
   groq: {
     name: "Groq (FREE)",
-    models: ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
     icon: "⚡",
     envKey: "GROQ_API_KEY",
     description: "Бесплатный, очень быстрый",
@@ -95,7 +96,7 @@ export default function HomePage() {
   const [selectedModel, setSelectedModel] = useState(AI_PROVIDERS.groq.models[0]);
   const [customApiKey, setCustomApiKey] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
-  const [showProviderSettings, setShowProviderSettings] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Load projects on mount
   useEffect(() => {
@@ -307,130 +308,17 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* AI Provider Selector */}
-            <div className="relative">
-              <button
-                onClick={() => setShowProviderSettings(!showProviderSettings)}
-                className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm hover:bg-slate-600 transition-colors"
-              >
-                <span>{AI_PROVIDERS[selectedProvider].icon}</span>
-                <span>{AI_PROVIDERS[selectedProvider].name}</span>
-                <span className="text-slate-400">|</span>
-                <span className="text-slate-400 text-xs">{selectedModel}</span>
-                <span>▼</span>
-              </button>
-
-              {/* Provider Dropdown */}
-              {showProviderSettings && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 p-4">
-                  <h3 className="font-semibold mb-3">🤖 Выбери AI модель</h3>
-
-                  {/* Provider Selection */}
-                  <div className="space-y-2 mb-4">
-                    {Object.entries(AI_PROVIDERS).map(([key, provider]) => (
-                      <button
-                        key={key}
-                        onClick={() => handleProviderChange(key as ProviderKey)}
-                        className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-3 transition-colors ${
-                          selectedProvider === key
-                            ? "bg-emerald-600/20 border border-emerald-600/30"
-                            : "hover:bg-slate-700"
-                        }`}
-                      >
-                        <span className="text-xl">{provider.icon}</span>
-                        <div className="flex-1">
-                          <div className="font-medium text-sm">{provider.name}</div>
-                          <div className="text-xs text-slate-400">{provider.description}</div>
-                        </div>
-                        {selectedProvider === key && (
-                          <span className="text-emerald-400">✓</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Model Selection */}
-                  <div className="mb-4">
-                    <label className="text-xs text-slate-400 block mb-1">Модель:</label>
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {AI_PROVIDERS[selectedProvider].models.map((model) => (
-                        <option key={model} value={model}>
-                          {model}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Custom API Key (for providers that need it) */}
-                  {selectedProvider === "custom" && (
-                    <>
-                      <div className="mb-3">
-                        <label className="text-xs text-slate-400 block mb-1">Base URL:</label>
-                        <input
-                          type="text"
-                          value={customBaseUrl}
-                          onChange={(e) => setCustomBaseUrl(e.target.value)}
-                          placeholder="https://api.example.com/v1"
-                          className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
-                      </div>
-                      <div className="mb-3">
-                        <label className="text-xs text-slate-400 block mb-1">API Key:</label>
-                        <input
-                          type="password"
-                          value={customApiKey}
-                          onChange={(e) => setCustomApiKey(e.target.value)}
-                          placeholder="sk-..."
-                          className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {/* Info about env keys */}
-                  {selectedProvider !== "custom" && selectedProvider !== "ollama" && (
-                    <div className="bg-slate-700/50 rounded-lg p-3 text-xs">
-                      <p className="text-slate-300 mb-1">
-                        💡 Ключ API берётся из переменной окружения:
-                      </p>
-                      <code className="text-emerald-400">{AI_PROVIDERS[selectedProvider].envKey}</code>
-                      <p className="text-slate-400 mt-2">
-                        Или вставьте свой ключ ниже:
-                      </p>
-                      <input
-                        type="password"
-                        value={customApiKey}
-                        onChange={(e) => setCustomApiKey(e.target.value)}
-                        placeholder="sk-..."
-                        className="w-full bg-slate-600 border border-slate-500 rounded-lg px-3 py-2 mt-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  )}
-
-                  {selectedProvider === "ollama" && (
-                    <div className="bg-slate-700/50 rounded-lg p-3 text-xs">
-                      <p className="text-slate-300 mb-1">
-                        🏠 Ollama запущен локально на порте 11434
-                      </p>
-                      <p className="text-slate-400">
-                        Убедитесь, что Ollama запущен: <code className="text-emerald-400">ollama serve</code>
-                      </p>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => setShowProviderSettings(false)}
-                    className="w-full mt-3 bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Применить
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* AI Settings Button */}
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm hover:bg-slate-600 transition-colors"
+            >
+              <span>{AI_PROVIDERS[selectedProvider].icon}</span>
+              <span>{AI_PROVIDERS[selectedProvider].name}</span>
+              <span className="text-slate-400">|</span>
+              <span className="text-slate-400 text-xs truncate max-w-32">{selectedModel}</span>
+              <span className="text-slate-400">⚙️</span>
+            </button>
 
             {/* Project Selector */}
             <select
@@ -673,6 +561,20 @@ export default function HomePage() {
           />
         )}
       </main>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        currentProvider={selectedProvider}
+        currentModel={selectedModel}
+        onSave={(provider, model, apiKey, baseUrl) => {
+          setSelectedProvider(provider as ProviderKey);
+          setSelectedModel(model);
+          setCustomApiKey(apiKey);
+          setCustomBaseUrl(baseUrl);
+        }}
+      />
     </div>
   );
 }

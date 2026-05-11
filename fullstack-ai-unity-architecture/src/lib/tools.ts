@@ -173,6 +173,52 @@ export const UNITY_TOOLS: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_game_object",
+      description: "Create a GameObject in the current scene with components. Use this to spawn characters, enemies, items, etc. directly in the scene.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Name of the GameObject, e.g. 'Player', 'Enemy', 'Coin'",
+          },
+          position: {
+            type: "string",
+            description: "JSON position, e.g. '{\"x\":0,\"y\":1,\"z\":0}'",
+          },
+          rotation: {
+            type: "string",
+            description: "JSON rotation, e.g. '{\"x\":0,\"y\":0,\"z\":0}'",
+          },
+          scale: {
+            type: "string",
+            description: "JSON scale, e.g. '{\"x\":1,\"y\":1,\"z\":1}'",
+          },
+          components: {
+            type: "string",
+            description: "Comma-separated list of components to add, e.g. 'Rigidbody,CapsuleCollider,MeshRenderer,PlayerController'",
+          },
+          primitive: {
+            type: "string",
+            description: "Primitive mesh type for visual representation",
+            enum: ["cube", "sphere", "capsule", "cylinder", "plane", "quad", "none"],
+          },
+          color: {
+            type: "string",
+            description: "Color for the object, e.g. 'red', 'blue', 'green', '#FF0000'",
+          },
+          parent: {
+            type: "string",
+            description: "Parent GameObject name (optional)",
+          },
+        },
+        required: ["name", "components", "primitive"],
+      },
+    },
+  },
 ];
 
 // Tool execution handlers (server-side logic)
@@ -399,6 +445,32 @@ export async function executeToolCall(
         success: true,
         commandId: cmd.id,
         message: `Executed editor command: ${args.command}`,
+      });
+    }
+
+    case "create_game_object": {
+      const [cmd] = await db
+        .insert(pendingCommands)
+        .values({
+          projectId,
+          commandType: "create_game_object",
+          payload: {
+            name: args.name,
+            position: args.position || '{"x":0,"y":0,"z":0}',
+            rotation: args.rotation || '{"x":0,"y":0,"z":0}',
+            scale: args.scale || '{"x":1,"y":1,"z":1}',
+            components: args.components,
+            primitive: args.primitive,
+            color: args.color || 'white',
+            parent: args.parent,
+          },
+        })
+        .returning({ id: pendingCommands.id });
+
+      return JSON.stringify({
+        success: true,
+        commandId: cmd.id,
+        message: `Created GameObject: ${args.name} with ${args.primitive} mesh`,
       });
     }
 
