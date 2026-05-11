@@ -111,15 +111,19 @@ namespace AliTerra
         private const int    MAX_SYNC_BYTES = 350 * 1024; // 350 KB per file
 
         // ── EditorPrefs ─────────────────────────────────────────────────
-        private const string PREF_SERVER_URL = "AliTerra_ServerUrl";
-        private const string PREF_AI_MODEL  = "AliTerra_Model";
-        private const string PREF_INPUT_H   = "AliTerra_InputH";
-        private const string PREF_GH_TOKEN  = "AliTerra_GH_Token";
-        private const string PREF_GH_OWNER  = "AliTerra_GH_Owner";
-        private const string PREF_GH_REPO   = "AliTerra_GH_Repo";
-        private const string PREF_GH_BRANCH = "AliTerra_GH_Branch";
-        private const string PREF_AUTO      = "AliTerra_AutoApply";
-        private const string PREF_POLLING   = "AliTerra_Polling";
+        private const string PREF_SERVER_URL   = "AliTerra_ServerUrl";
+        private const string PREF_AI_MODEL     = "AliTerra_Model";
+        private const string PREF_INPUT_H      = "AliTerra_InputH";
+        private const string PREF_GH_TOKEN     = "AliTerra_GH_Token";
+        private const string PREF_GH_OWNER     = "AliTerra_GH_Owner";
+        private const string PREF_GH_REPO      = "AliTerra_GH_Repo";
+        private const string PREF_GH_BRANCH    = "AliTerra_GH_Branch";
+        private const string PREF_AUTO         = "AliTerra_AutoApply";
+        private const string PREF_POLLING      = "AliTerra_Polling";
+        private const string PREF_DIRECT_MODE  = "AliTerra_DirectMode";
+        private const string PREF_DIRECT_URL   = "AliTerra_DirectUrl";
+        private const string PREF_DIRECT_KEY   = "AliTerra_DirectKey";
+        private const string PREF_DIRECT_MODEL = "AliTerra_DirectModel";
 
         // ── UI ──────────────────────────────────────────────────────────
         private int    activeTab  = 0;
@@ -153,6 +157,29 @@ namespace AliTerra
 
         // ── Input area ───────────────────────────────────────────────────
         private float   inputAreaHeight = 80f;
+
+        // ── Direct AI mode (no server) ───────────────────────────────────
+        private bool   directMode      = false;
+        private string directApiUrl    = "https://api.openai.com/v1";
+        private string directApiKey    = "";
+        private string directModel     = "gpt-4o";
+        private int    directModelIdx  = 0;
+        private bool   showDirectKey   = false;
+        private static readonly string[] DIRECT_PRESETS = new string[]
+        {
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "o4-mini",
+            "gemini-2.0-flash",
+            "gemini-2.5-pro",
+            "llama3.3",
+            "mistral-small",
+            "deepseek-chat",
+            "custom..."
+        };
 
         // ── Auto-apply ──────────────────────────────────────────────────
         private bool autoApply = false;
@@ -261,6 +288,15 @@ namespace AliTerra
             for (int k = 0; k < PRESET_MODELS.Length - 1; k++)
                 if (PRESET_MODELS[k] == aiModel) { modelIndex = k; break; }
 
+            // Load direct mode settings
+            directMode     = EditorPrefs.GetBool  (PREF_DIRECT_MODE,  false);
+            directApiUrl   = EditorPrefs.GetString(PREF_DIRECT_URL,   "https://api.openai.com/v1");
+            directApiKey   = EditorPrefs.GetString(PREF_DIRECT_KEY,   "");
+            directModel    = EditorPrefs.GetString(PREF_DIRECT_MODEL, "gpt-4o");
+            directModelIdx = 0;
+            for (int k = 0; k < DIRECT_PRESETS.Length - 1; k++)
+                if (DIRECT_PRESETS[k] == directModel) { directModelIdx = k; break; }
+
             autoApply = EditorPrefs.GetBool(PREF_AUTO, false);
             polling   = EditorPrefs.GetBool(PREF_POLLING, false);
             ghToken   = EditorPrefs.GetString(PREF_GH_TOKEN, "");
@@ -296,9 +332,13 @@ namespace AliTerra
 
         void OnDisable()
         {
-            EditorPrefs.SetString(PREF_SERVER_URL, serverUrl);
-            EditorPrefs.SetString(PREF_AI_MODEL,   aiModel);
-            EditorPrefs.SetFloat (PREF_INPUT_H,    inputAreaHeight);
+            EditorPrefs.SetString(PREF_SERVER_URL,   serverUrl);
+            EditorPrefs.SetString(PREF_AI_MODEL,     aiModel);
+            EditorPrefs.SetFloat (PREF_INPUT_H,      inputAreaHeight);
+            EditorPrefs.SetBool  (PREF_DIRECT_MODE,  directMode);
+            EditorPrefs.SetString(PREF_DIRECT_URL,   directApiUrl);
+            EditorPrefs.SetString(PREF_DIRECT_KEY,   directApiKey);
+            EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel);
             EditorPrefs.SetBool  (PREF_AUTO,        autoApply);
             EditorPrefs.SetBool  (PREF_POLLING,     polling);
             EditorPrefs.SetString(PREF_GH_TOKEN,    ghToken);
@@ -975,6 +1015,15 @@ namespace AliTerra
             string input = userInput.Trim();
             userInput = "";
 
+            if (directMode && string.IsNullOrEmpty(directApiKey))
+            {
+                isBusy = false;
+                statusMsg = "❌ Укажи API Key во вкладке Fullstack → Direct AI Mode";
+                history.Add(new ChatMsg { text = "❌ Нет API ключа. Перейди в Fullstack → Direct AI Mode и введи API Key.", isUser = false });
+                Repaint();
+                return;
+            }
+
             history.Add(new ChatMsg { isUser = true, text = input });
 
             ChatMsg pending = new ChatMsg { isPending = true, text = "Думаю", startTime = EditorApplication.timeSinceStartup };
@@ -982,10 +1031,167 @@ namespace AliTerra
             pendingIndex = history.Count - 1;
             retryCount   = 0;
 
-            lastJson = BuildChatJson(input);
             Repaint();
 
-            EditorCoroutine.Start(SendChatRoutine(lastJson));
+            if (directMode)
+            {
+                EditorCoroutine.Start(SendDirectChatRoutine(BuildDirectChatJson(input)));
+            }
+            else
+            {
+                lastJson = BuildChatJson(input);
+                EditorCoroutine.Start(SendChatRoutine(lastJson));
+            }
+        }
+
+        // ── Direct AI: build OpenAI-compatible JSON ─────────────────────
+        string BuildDirectChatJson(string userMessage)
+        {
+            StringBuilder sys = new StringBuilder();
+            sys.Append("You are an expert Unity C# developer for the AliTerra metaverse P2E game. ");
+            sys.Append("When writing or fixing scripts always provide the COMPLETE file content in a single ```csharp code block. ");
+            sys.Append("Unity version: 2021+. C# 9 available.");
+
+            if (!string.IsNullOrEmpty(ctxScene))
+            { sys.Append("\\n\\nScene: "); sys.Append(ctxScene); }
+            if (!string.IsNullOrEmpty(ctxObject))
+            { sys.Append("\\nSelected object: "); sys.Append(ctxObject); }
+            if (!string.IsNullOrEmpty(sceneHierarchy))
+            {
+                string h = sceneHierarchy.Length > 3000 ? sceneHierarchy.Substring(0, 3000) : sceneHierarchy;
+                sys.Append("\\n\\nScene hierarchy:\\n"); sys.Append(EscapeJson(h));
+            }
+            if (selectedFile != null && !string.IsNullOrEmpty(fileContent))
+            {
+                sys.Append("\\n\\nCurrent file ("); sys.Append(EscapeJson(selectedFile.assetPath)); sys.Append("):\\n```csharp\\n");
+                string fc = fileContent.Length > 14000 ? fileContent.Substring(0, 14000) + "\\n...(truncated)" : fileContent;
+                sys.Append(EscapeJson(fc));
+                sys.Append("\\n```");
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.Append("{\"model\":\""); sb.Append(EscapeJson(directModel));
+            sb.Append("\",\"max_tokens\":8192,\"messages\":[");
+            sb.Append("{\"role\":\"system\",\"content\":\""); sb.Append(sys.ToString()); sb.Append("\"}");
+
+            // History (last 10 non-pending)
+            List<ChatMsg> toSend = new List<ChatMsg>();
+            for (int i = 0; i < history.Count - 1; i++)
+                if (!history[i].isPending) toSend.Add(history[i]);
+            if (toSend.Count > 10) toSend = toSend.GetRange(toSend.Count - 10, 10);
+
+            foreach (ChatMsg m in toSend)
+            {
+                sb.Append(",{\"role\":\"");
+                sb.Append(m.isUser ? "user" : "assistant");
+                sb.Append("\",\"content\":\"");
+                string txt = m.isUser ? m.text
+                    : (m.text + (string.IsNullOrEmpty(m.code) ? "" : "\\n```csharp\\n" + m.code + "\\n```"));
+                sb.Append(EscapeJson(txt));
+                sb.Append("\"}");
+            }
+
+            sb.Append(",{\"role\":\"user\",\"content\":\"");
+            sb.Append(EscapeJson(userMessage));
+            sb.Append("\"}]}");
+            return sb.ToString();
+        }
+
+        // ── Direct AI: send HTTP to OpenAI-compatible endpoint ──────────
+        IEnumerator SendDirectChatRoutine(string json)
+        {
+            cancelRequested = false;
+            bool   success  = false;
+            string respText = "";
+
+            string url = directApiUrl.TrimEnd('/') + "/chat/completions";
+            byte[] bytes = Encoding.UTF8.GetBytes(json);
+            chatRequest = new UnityWebRequest(url, "POST");
+            chatRequest.uploadHandler   = new UploadHandlerRaw(bytes);
+            chatRequest.downloadHandler = new DownloadHandlerBuffer();
+            chatRequest.SetRequestHeader("Content-Type",  "application/json");
+            chatRequest.SetRequestHeader("Authorization", "Bearer " + directApiKey);
+            chatRequest.timeout = 120;
+            yield return chatRequest.SendWebRequest();
+
+            if (!cancelRequested && chatRequest != null)
+            {
+                success  = chatRequest.result == UnityWebRequest.Result.Success;
+                respText = success ? chatRequest.downloadHandler.text : chatRequest.error;
+            }
+            if (chatRequest != null) { try { chatRequest.Dispose(); } catch { } chatRequest = null; }
+            if (cancelRequested) yield break;
+
+            isBusy = false;
+
+            if (!success)
+            {
+                if (pendingIndex >= 0 && pendingIndex < history.Count)
+                    history[pendingIndex] = new ChatMsg { text = "❌ Ошибка: " + respText };
+                pendingIndex = -1;
+                statusMsg    = "";
+                Repaint();
+                yield break;
+            }
+
+            ParseDirectChatResponse(respText);
+            pendingIndex = -1;
+            retryCount   = 0;
+            statusMsg    = "";
+            Repaint();
+        }
+
+        // ── Direct AI: parse OpenAI-compatible response ─────────────────
+        void ParseDirectChatResponse(string json)
+        {
+            // Extract content from choices[0].message.content
+            // The content field value uses JSON escaping
+            Match m = Regex.Match(json, "\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (!m.Success || string.IsNullOrEmpty(m.Groups[1].Value))
+            {
+                // Try null content (vision/tool calls)
+                if (pendingIndex >= 0 && pendingIndex < history.Count)
+                    history[pendingIndex] = new ChatMsg { text = "❌ Пустой ответ (возможно, модель не поддерживает этот формат)" };
+                AddCommandLog("❌ Direct AI: пустой content");
+                return;
+            }
+            string content = UnescapeJson(m.Groups[1].Value);
+
+            // Extract code block (```csharp ... ``` or ``` ... ```)
+            string code = "";
+            Match cm = Regex.Match(content, "```(?:csharp|cs|unity|c#)?\\n([\\s\\S]*?)```");
+            if (cm.Success) code = cm.Groups[1].Value.Trim();
+
+            string display = content;
+            if (!string.IsNullOrEmpty(code))
+                display = Regex.Replace(display, @"```[\s\S]*?```", "[📜 код ниже]").Trim();
+
+            if (pendingIndex >= 0 && pendingIndex < history.Count)
+            {
+                history[pendingIndex] = new ChatMsg
+                {
+                    text      = display,
+                    code      = code,
+                    isPending = false,
+                };
+                if (!string.IsNullOrEmpty(code) && autoApply && selectedFile != null)
+                {
+                    ApplyCode(code, selectedFile.assetPath);
+                    history[pendingIndex].text += "\n\n⚡ Авто-применено к: " + selectedFile.assetPath;
+                }
+            }
+
+            AddCommandLog("💬 Direct AI ответил [" + directModel + "]" + (string.IsNullOrEmpty(code) ? "" : " + код"));
+        }
+
+        static string UnescapeJson(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\n",  "\n")
+                    .Replace("\\r",  "\r")
+                    .Replace("\\t",  "\t")
+                    .Replace("\\\"", "\"")
+                    .Replace("\\\\", "\\");
         }
 
         string BuildChatJson(string lastUserMsg)
@@ -1441,15 +1647,23 @@ namespace AliTerra
 
             GUILayout.Space(4);
 
-            // ── POLLING TOGGLE BUTTON (always visible in header) ───────
-            GUI.color = polling ? new Color(0.4f, 1f, 0.4f) : new Color(1f, 0.6f, 0.6f);
-            if (GUILayout.Button(polling ? "● POLLING ON" : "○ POLLING OFF", EditorStyles.toolbarButton, GUILayout.Width(110)))
-            {
-                polling = !polling;
-                EditorPrefs.SetBool(PREF_POLLING, polling);
-                AddCommandLog(polling ? "▶ Polling включён" : "■ Polling выключён");
-            }
+            // ── MODE INDICATOR ─────────────────────────────────────────
+            GUI.color = directMode ? new Color(1f, 0.85f, 0.3f) : new Color(0.5f, 0.8f, 1f);
+            GUILayout.Label(directMode ? "⚡ DIRECT" : "🌐 SERVER", EditorStyles.miniLabel, GUILayout.Width(70));
             GUI.color = old;
+
+            // ── POLLING TOGGLE BUTTON (only relevant in server mode) ───
+            if (!directMode)
+            {
+                GUI.color = polling ? new Color(0.4f, 1f, 0.4f) : new Color(1f, 0.6f, 0.6f);
+                if (GUILayout.Button(polling ? "● POLL ON" : "○ POLL OFF", EditorStyles.toolbarButton, GUILayout.Width(90)))
+                {
+                    polling = !polling;
+                    EditorPrefs.SetBool(PREF_POLLING, polling);
+                    AddCommandLog(polling ? "▶ Polling включён" : "■ Polling выключён");
+                }
+                GUI.color = old;
+            }
 
             // Pending commands badge
             if (pendingCmds > 0)
@@ -1845,6 +2059,116 @@ namespace AliTerra
                     EditorCoroutine.Start(TestConnectionRoutine());
                 if (GUILayout.Button("📋 Копировать URL", EditorStyles.miniButton, GUILayout.Width(130)))
                     EditorGUIUtility.systemCopyBuffer = serverUrl;
+                EditorGUILayout.EndHorizontal();
+            }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(4);
+
+            // ── Direct AI Mode ─────────────────────────────────────────
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("⚡ Direct AI Mode", EditorStyles.boldLabel, GUILayout.ExpandWidth(true));
+            Color dm_old = GUI.color;
+            GUI.color = directMode ? new Color(0.4f, 1f, 0.4f) : Color.white;
+            bool newDirect = EditorGUILayout.Toggle(directMode, GUILayout.Width(20));
+            GUI.color = dm_old;
+            if (newDirect != directMode)
+            {
+                directMode = newDirect;
+                EditorPrefs.SetBool(PREF_DIRECT_MODE, directMode);
+                AddCommandLog(directMode ? "⚡ Direct AI Mode включён" : "🌐 Режим Сервер включён");
+            }
+            GUI.color = directMode ? new Color(0.4f, 1f, 0.4f) : new Color(0.8f, 0.8f, 0.8f);
+            GUILayout.Label(directMode ? "● ВКЛ" : "○ ВЫКЛ", EditorStyles.miniLabel, GUILayout.Width(45));
+            GUI.color = dm_old;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField(
+                directMode
+                    ? "AI вызывается НАПРЯМУЮ без сервера — OpenAI, Ollama, Groq и любой OpenAI-совместимый провайдер."
+                    : "Режим сервер: AI вызывается через наш сервер (Anthropic Claude). Включи Direct AI для других провайдеров.",
+                EditorStyles.wordWrappedMiniLabel);
+
+            if (directMode)
+            {
+                EditorGUILayout.Space(4);
+
+                // API Base URL
+                EditorGUILayout.LabelField("API Base URL:", EditorStyles.miniLabel);
+                EditorGUILayout.BeginHorizontal();
+                string newUrl2 = EditorGUILayout.TextField(directApiUrl);
+                if (newUrl2 != directApiUrl)
+                {
+                    directApiUrl = newUrl2.Trim().TrimEnd('/');
+                    EditorPrefs.SetString(PREF_DIRECT_URL, directApiUrl);
+                }
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.LabelField("Примеры: https://api.openai.com/v1  |  http://localhost:11434/v1  |  https://api.groq.com/openai/v1", EditorStyles.wordWrappedMiniLabel);
+
+                EditorGUILayout.Space(2);
+
+                // API Key
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("API Key:", EditorStyles.miniLabel, GUILayout.Width(55));
+                if (showDirectKey)
+                {
+                    string newKey = EditorGUILayout.TextField(directApiKey);
+                    if (newKey != directApiKey)
+                    {
+                        directApiKey = newKey.Trim();
+                        EditorPrefs.SetString(PREF_DIRECT_KEY, directApiKey);
+                    }
+                }
+                else
+                {
+                    string masked = string.IsNullOrEmpty(directApiKey) ? "(не задан)" : new string('•', Mathf.Min(directApiKey.Length, 20));
+                    GUI.color = string.IsNullOrEmpty(directApiKey) ? Color.red : Color.green;
+                    EditorGUILayout.LabelField(masked, EditorStyles.miniLabel);
+                    GUI.color = dm_old;
+                }
+                if (GUILayout.Button(showDirectKey ? "🙈" : "👁", EditorStyles.miniButton, GUILayout.Width(26)))
+                    showDirectKey = !showDirectKey;
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.Space(2);
+
+                // Model
+                EditorGUILayout.LabelField("Модель:", EditorStyles.miniLabel);
+                int newIdx2 = EditorGUILayout.Popup(directModelIdx, DIRECT_PRESETS);
+                if (newIdx2 != directModelIdx)
+                {
+                    directModelIdx = newIdx2;
+                    if (directModelIdx < DIRECT_PRESETS.Length - 1)
+                    {
+                        directModel = DIRECT_PRESETS[directModelIdx];
+                        EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel);
+                    }
+                }
+                if (directModelIdx == DIRECT_PRESETS.Length - 1)
+                {
+                    string newMdl = EditorGUILayout.TextField("Своя модель:", directModel);
+                    if (newMdl != directModel)
+                    {
+                        directModel = newMdl.Trim();
+                        EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel);
+                    }
+                }
+                EditorGUILayout.LabelField("Текущая: " + directModel, EditorStyles.miniLabel);
+
+                EditorGUILayout.Space(2);
+
+                // Quick templates
+                EditorGUILayout.LabelField("Быстрые настройки:", EditorStyles.boldLabel);
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("OpenAI", EditorStyles.miniButton))
+                { directApiUrl = "https://api.openai.com/v1"; directModel = "gpt-4o"; directModelIdx = 0; EditorPrefs.SetString(PREF_DIRECT_URL, directApiUrl); EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel); }
+                if (GUILayout.Button("Groq", EditorStyles.miniButton))
+                { directApiUrl = "https://api.groq.com/openai/v1"; directModel = "llama-3.3-70b-versatile"; directModelIdx = DIRECT_PRESETS.Length - 1; EditorPrefs.SetString(PREF_DIRECT_URL, directApiUrl); EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel); }
+                if (GUILayout.Button("Ollama", EditorStyles.miniButton))
+                { directApiUrl = "http://localhost:11434/v1"; directApiKey = "ollama"; directModel = "llama3.3"; directModelIdx = 8; EditorPrefs.SetString(PREF_DIRECT_URL, directApiUrl); EditorPrefs.SetString(PREF_DIRECT_KEY, directApiKey); EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel); }
+                if (GUILayout.Button("DeepSeek", EditorStyles.miniButton))
+                { directApiUrl = "https://api.deepseek.com/v1"; directModel = "deepseek-chat"; directModelIdx = 10; EditorPrefs.SetString(PREF_DIRECT_URL, directApiUrl); EditorPrefs.SetString(PREF_DIRECT_MODEL, directModel); }
                 EditorGUILayout.EndHorizontal();
             }
             EditorGUILayout.EndVertical();
