@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vibe Unity Developer</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <main class="app">
+      <aside class="side">
+        <div class="brand">
+          <div class="mark">VU</div>
+          <div>
+            <h1>Vibe Unity Developer</h1>
+            <p>Локальный AI-геймдев для Unity</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>Статус</h2>
+          <dl class="stats">
+            <div><dt>Проект</dt><dd id="projectName">-</dd></div>
+            <div><dt>Файлы</dt><dd id="fileCount">0</dd></div>
+            <div><dt>Сцена</dt><dd id="sceneName">-</dd></div>
+            <div><dt>Sync</dt><dd id="lastSync">нет</dd></div>
+          </dl>
+          <a class="download" href="/plugin/VibeUnityDeveloper.cs">Скачать Unity-плагин</a>
+        </section>
+
+        <section class="panel">
+          <h2>Настройки AI</h2>
+          <label>
+            Base URL
+            <input id="baseUrl" placeholder="https://api.openai.com/v1">
+          </label>
+          <label>
+            Model
+            <input id="model" placeholder="gpt-5.1">
+          </label>
+          <label>
+            API key
+            <input id="apiKey" type="password" placeholder="Вставь ключ один раз">
+          </label>
+          <label class="check">
+            <input id="autoApply" type="checkbox">
+            Auto-apply без кнопки Apply
+          </label>
+          <button id="saveSettings" class="secondary">Сохранить</button>
+          <p id="settingsStatus" class="hint"></p>
+        </section>
+      </aside>
+
+      <section class="chat">
+        <header class="chatHead">
+          <div>
+            <h2>Вайб-кодинг</h2>
+            <p>Пиши обычным языком. Изменения сначала появятся как proposal.</p>
+          </div>
+          <button id="refreshState" class="ghost">Обновить</button>
+        </header>
+
+        <div id="messages" class="messages">
+          <div class="bubble assistant">
+            Привет. Запусти Unity-плагин, нажми Sync All Files, потом скажи что хочешь построить или исправить.
+          </div>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="message" rows="3" placeholder="Например: добавь простую систему инвентаря с UI и сохранением предметов"></textarea>
+          <button id="sendMessage" type="submit">Отправить</button>
+        </form>
+
+        <section class="proposals">
+          <h2>Предложения к применению</h2>
+          <div id="proposalList" class="proposalList"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
