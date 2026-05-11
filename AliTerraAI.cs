@@ -1576,7 +1576,7 @@ namespace AliTerra
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
 
-            Color old = GUI.color;
+            old = GUI.color;
             GUI.color = syncStatus.StartsWith("✅") ? Color.green : syncStatus.StartsWith("❌") ? Color.red : Color.yellow;
             EditorGUILayout.LabelField(syncStatus, EditorStyles.wordWrappedMiniLabel);
             GUI.color = old;
