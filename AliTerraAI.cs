@@ -974,7 +974,6 @@ namespace AliTerra
 
             string input = userInput.Trim();
             userInput = "";
-            GUI.FocusControl("");
 
             history.Add(new ChatMsg { isUser = true, text = input });
 
@@ -1633,11 +1632,9 @@ namespace AliTerra
             }
 
             // TextArea
-            GUI.SetNextControlName("chatInput");
             userInput = EditorGUILayout.TextArea(
                 userInput,
-                GUILayout.MinHeight(inputAreaHeight),
-                GUILayout.MaxHeight(inputAreaHeight),
+                GUILayout.Height(inputAreaHeight),
                 GUILayout.ExpandWidth(true));
 
             // Send row
