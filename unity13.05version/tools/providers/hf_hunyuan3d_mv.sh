@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# hf_hunyuan3d_mv.sh — Hugging Face Spaces client for Hunyuan3D-2mv (Tencent).
+# hf_hunyuan3d_mv.sh — Hugging Face Spaces client for Hunyuan3D-2 (Tencent).
 #
-# Calls the public Gradio API of `tencent/Hunyuan3D-2mv` to generate a 3D mesh
-# from multiple view images. Multi-view input gives substantially better back/
-# side geometry than single-view models (~85-90% photo correspondence vs ~70%
-# for TripoSR).
+# Calls the public Gradio API of `tencent/Hunyuan3D-2` Space to generate a 3D
+# mesh from one or more view images. Multi-view input gives substantially
+# better back/side geometry than single-view models.
+#
+# Verified working (2026-05-13):
+#   - Space:     tencent/Hunyuan3D-2 (not -2mv, see note below)
+#   - Endpoint:  /shape_generation
+#                Returns untextured white_mesh.glb only.
+#                Time: ~15s for 4 views @ octree_resolution=256.
+#   - /generation_all (textured mesh) currently returns AppError "NameError"
+#     — server-side bug in their Gradio wrapper. /shape_generation works.
+#     Workaround: bake texture locally from MV images via bake_mv_texture.sh.
 #
 # Requires:
 #   - HF_TOKEN env var (free read token: https://huggingface.co/settings/tokens)
@@ -13,14 +21,16 @@
 # Usage:
 #   hf_hunyuan3d_mv.sh <output_glb> <front.png> [back.png] [left.png] [right.png]
 #
-# At least the front view is required. Provide more views (in any order) to
-# improve coverage. The space accepts up to 4 views.
+# At least the front view is required. The endpoint also requires the front
+# image be passed as the single fallback `image` parameter (validation in the
+# upstream Space requires either caption or image to be set).
 #
 # Notes:
-#   - Anonymous calls return "GPU duration > 90s" errors. A free token unlocks
-#     ~5 minutes of GPU time per day, plenty for a few generations.
-#   - Spaces occasionally pause. If the request fails with "Space is sleeping"
-#     or 503, just retry — first request wakes the container.
+#   - Initial cold-start on the Space adds ~30-60s latency.
+#   - HF free tier limits anonymous GPU usage; a token gives ~5 GPU-min/day.
+#   - The "-2mv" sibling Space (multi-view only) was in RUNTIME_ERROR state at
+#     time of writing. The full Hunyuan3D-2 Space supports MV via 4 mv_image_*
+#     slots — that's what we use here.
 
 set -euo pipefail
 
@@ -52,37 +62,55 @@ import shutil
 import sys
 import time
 
-from gradio_client import Client, file as gr_file
+from gradio_client import Client, handle_file
 
 out_glb = sys.argv[1]
 views = sys.argv[2:]
 token = os.environ["HF_TOKEN"]
 
-# Pad to 4 views (front, back, left, right). Repeat last available view for missing slots.
-slots = views + [views[-1]] * (4 - len(views))
-slots = slots[:4]
+# Map views to roles: front, back, left, right
+front = views[0]
+back  = views[1] if len(views) > 1 else None
+left  = views[2] if len(views) > 2 else None
+right = views[3] if len(views) > 3 else None
 
-print(f"[hf_hunyuan3d_mv] Connecting to tencent/Hunyuan3D-2mv ...", flush=True)
-client = Client("tencent/Hunyuan3D-2mv", hf_token=token)
+print(f"[hf_hunyuan3d_mv] Connecting to tencent/Hunyuan3D-2 ...", flush=True)
+# gradio_client API: token=... (NOT hf_token)
+client = Client("tencent/Hunyuan3D-2", token=token, verbose=False)
 
-print(f"[hf_hunyuan3d_mv] Submitting {len(views)} unique views (padded to 4 slots)...", flush=True)
+print(f"[hf_hunyuan3d_mv] Submitting {len(views)} view(s) to /shape_generation...", flush=True)
 t0 = time.time()
-# The exact API signature depends on the Space; this is a representative call.
-# Adjust `api_name` if upstream changes their endpoint.
-result = client.predict(
-    gr_file(slots[0]),
-    gr_file(slots[1]),
-    gr_file(slots[2]),
-    gr_file(slots[3]),
-    1234,           # seed
-    20,             # num_inference_steps
-    7.5,            # guidance_scale
-    True,           # remove_background
-    api_name="/generation_all",
-)
-print(f"[hf_hunyuan3d_mv] Generation finished in {time.time()-t0:.1f}s", flush=True)
 
-# result is typically (gradio_file_path_to_glb, ...). Locate the .glb in the tuple.
+# Signature (from `client.view_api()`):
+#   /shape_generation(caption, image, mv_image_front, mv_image_back,
+#                     mv_image_left, mv_image_right, steps, guidance_scale,
+#                     seed, octree_resolution, check_box_rembg, num_chunks,
+#                     randomize_seed) -> (file, output, mesh_stats, seed)
+#
+# IMPORTANT: the Space validates that EITHER caption OR `image` is set, even
+# when MV slots are provided. We always pass the front image to `image` to
+# satisfy that check.
+result = client.predict(
+    None,                                # caption
+    handle_file(front),                  # image (required validation)
+    handle_file(front),                  # mv_image_front
+    handle_file(back)  if back  else None,
+    handle_file(left)  if left  else None,
+    handle_file(right) if right else None,
+    30,        # steps (1-100)
+    5.0,       # guidance_scale
+    1234,      # seed (0..1e7)
+    256,       # octree_resolution (16-512); 256 is sweet spot for body
+    True,      # check_box_rembg
+    8000,      # num_chunks (1000-5000000)
+    False,     # randomize_seed
+    api_name="/shape_generation",
+)
+
+elapsed = time.time() - t0
+print(f"[hf_hunyuan3d_mv] Generation finished in {elapsed:.1f}s", flush=True)
+
+# Locate the .glb in the response
 candidates = []
 def walk(obj):
     if isinstance(obj, (list, tuple)):
@@ -100,4 +128,6 @@ if not candidates:
 shutil.copy(candidates[0], out_glb)
 size = os.path.getsize(out_glb)
 print(f"[hf_hunyuan3d_mv] OK -> {out_glb} ({size} bytes)")
+print(f"[hf_hunyuan3d_mv] NOTE: result is untextured. To add texture, run:")
+print(f"[hf_hunyuan3d_mv]   bake_mv_texture.sh {out_glb} <front.png> <back.png> <left.png> <right.png>")
 PY

@@ -6,11 +6,20 @@
 # to local TripoSR (CPU-only, no API key) if all cloud paths fail.
 #
 # Provider order (default; better quality first):
-#   1. Meshy.ai           — MESHY_API_KEY     (paid; AAA quality, PBR, A/T-pose)
-#   2. HF Hunyuan3D-2mv   — HF_TOKEN          (free; multi-view, ~85-90% match)
-#   3. HF TripoSG         — HF_TOKEN          (free; single-view, flow-based)
-#   4. Neural4D           — NEURAL4D_API_KEY  (pay-as-go; 2K texture, watertight)
-#   5. TripoSR local      — none (always)    (CPU, ~70% match, no cost)
+#   1. Tripo3D            — TRIPO3D_API_KEY   (paid API credits; AAA, PBR v2.5)
+#   2. Meshy.ai           — MESHY_API_KEY     (paid; AAA quality, PBR, A/T-pose)
+#   3. HF Hunyuan3D-2 MV  — HF_TOKEN          (free; multi-view, ~85-90% match)
+#   4. HF TripoSG         — HF_TOKEN          (free; single-view, flow-based)
+#   5. Neural4D           — NEURAL4D_API_KEY  (pay-as-go; 2K texture, watertight)
+#   6. TripoSR local      — none (always)    (CPU, ~70% match, no cost)
+#
+# Multi-view note: the HF Hunyuan3D-2 path returns an untextured mesh because
+# the Space's /generation_all endpoint is currently broken (NameError). If you
+# pass >=4 views and want colors, follow up with bake_mv_texture.sh:
+#
+#   tools/providers/hf_hunyuan3d_mv.sh out.glb front.png back.png left.png right.png
+#   tools/bake_mv_texture.sh out.glb out_colored.glb \
+#       front.png back.png left.png right.png
 #
 # If you pass >=2 views, only providers that accept multi-view input are
 # considered before falling back. If you pass --prefer X, that provider is
@@ -73,6 +82,7 @@ HAS_MULTIVIEW=$(( ${#INPUTS[@]} >= 2 ? 1 : 0 ))
 
 # Catalogue of providers (id|requires_env|supports_multi|description)
 declare -A AVAILABLE
+AVAILABLE[tripo3d]="${TRIPO3D_API_KEY:-}"
 AVAILABLE[meshy]="${MESHY_API_KEY:-}"
 AVAILABLE[hf-mv]="${HF_TOKEN:-}"
 AVAILABLE[hf-sv]="${HF_TOKEN:-}"
@@ -82,6 +92,11 @@ AVAILABLE[local]="always"
 try_provider() {
     local id="$1"
     case "$id" in
+        tripo3d)
+            [[ -n "${AVAILABLE[tripo3d]}" ]] || return 1
+            echo "[dispatch] Trying Tripo3D ..." >&2
+            bash "$PROVIDERS_DIR/tripo3d_img_to_3d.sh" "$MAIN_INPUT" "$OUT_GLB"
+            ;;
         meshy)
             [[ -n "${AVAILABLE[meshy]}" ]] || return 1
             echo "[dispatch] Trying Meshy.ai ..." >&2
@@ -119,7 +134,7 @@ try_provider() {
 }
 
 # Determine order
-DEFAULT_ORDER=(meshy hf-mv hf-sv neural4d local)
+DEFAULT_ORDER=(tripo3d meshy hf-mv hf-sv neural4d local)
 ORDER=()
 if [[ -n "$PREFER" ]]; then
     ORDER+=("$PREFER")
@@ -129,7 +144,7 @@ else
 fi
 
 echo "[dispatch] views=${#INPUTS[@]} out=$OUT_GLB order=${ORDER[*]}" >&2
-echo "[dispatch] keys: meshy=$([[ -n ${AVAILABLE[meshy]} ]] && echo yes || echo no) hf=$([[ -n ${AVAILABLE[hf-mv]} ]] && echo yes || echo no) neural4d=$([[ -n ${AVAILABLE[neural4d]} ]] && echo yes || echo no)" >&2
+echo "[dispatch] keys: tripo3d=$([[ -n ${AVAILABLE[tripo3d]} ]] && echo yes || echo no) meshy=$([[ -n ${AVAILABLE[meshy]} ]] && echo yes || echo no) hf=$([[ -n ${AVAILABLE[hf-mv]} ]] && echo yes || echo no) neural4d=$([[ -n ${AVAILABLE[neural4d]} ]] && echo yes || echo no)" >&2
 
 LAST_ERR=""
 for p in "${ORDER[@]}"; do
