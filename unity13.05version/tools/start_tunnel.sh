@@ -2,9 +2,19 @@
 # start_tunnel.sh — публикует локальный порт в интернет через `cloudflared` quick-tunnel.
 #
 # Usage:
-#   ./start_tunnel.sh [local_port]
+#   ./start_tunnel.sh [local_port] [scheme]
 #
-# По умолчанию: local_port = 443 (там, где обычно живёт unity-mcp-server).
+# Параметры:
+#   local_port — порт, на котором слушает unity-mcp-server (по умолчанию 443).
+#   scheme     — http или https (по умолчанию http).
+#                Контейнер unity-mcp-server слушает обычный HTTP без TLS, поэтому
+#                cloudflared должен дёргать его по http://localhost:<port>.
+#                (Если поставить https — упрёшься в "SSL handshake failed" 502.)
+#
+# ВАЖНО: `--protocol http2` обязателен. По умолчанию cloudflared использует QUIC (UDP/443
+# к Cloudflare edge), который во многих окружениях (CI, контейнеры, VPN) блокируется на
+# фаерволе — тоннель часами висит в "failed to dial quic" и не поднимается. HTTP/2 (TCP/443)
+# работает везде, где есть исходящий HTTPS.
 #
 # Скрипт пишет публичный URL в $HOME/.config/unity-mcp/url, чтобы mcp_call.sh
 # его подхватил автоматически. Сам процесс cloudflared логируется в /tmp/cloudflared.log.
@@ -14,6 +24,7 @@
 set -euo pipefail
 
 PORT="${1:-443}"
+SCHEME="${2:-http}"
 CONFIG_DIR="${MCP_CONFIG_DIR:-$HOME/.config/unity-mcp}"
 mkdir -p "$CONFIG_DIR"
 
@@ -32,9 +43,15 @@ if ! command -v cloudflared >/dev/null 2>&1; then
 fi
 
 LOG="/tmp/cloudflared.log"
-nohup cloudflared tunnel --url "https://localhost:${PORT}" --no-tls-verify >"$LOG" 2>&1 &
+ORIGIN_URL="${SCHEME}://localhost:${PORT}"
+EXTRA_OPTS="--protocol http2"
+if [ "$SCHEME" = "https" ]; then
+    EXTRA_OPTS="$EXTRA_OPTS --no-tls-verify"
+fi
+# shellcheck disable=SC2086
+nohup cloudflared tunnel --url "$ORIGIN_URL" $EXTRA_OPTS >"$LOG" 2>&1 &
 TUNNEL_PID=$!
-echo "[start_tunnel] launched cloudflared pid $TUNNEL_PID, waiting for URL..."
+echo "[start_tunnel] launched cloudflared pid $TUNNEL_PID, waiting for URL... (origin=$ORIGIN_URL, opts=$EXTRA_OPTS)"
 
 # Ждём появления URL вида *.trycloudflare.com в логе.
 URL=""

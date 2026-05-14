@@ -99,7 +99,9 @@ agent's `mcp_call.sh` returns connection errors, plugin shows red.
 
 1. Run `./tools/start_unity_mcp_server.sh "<existing_token>"` (idempotent —
    no-op if container already runs with same token).
-2. Run `./tools/start_tunnel.sh 443` — new URL printed.
+2. Run `./tools/start_tunnel.sh <port>` — new URL printed. The script already
+   uses `--protocol http2` (see gotcha below). If the container is on a
+   non-default port (e.g. 29422), pass it explicitly.
 3. Tell the user the new URL → they paste it into the plugin → reconnect.
 4. **Token unchanged.** No need to re-fetch.
 
@@ -119,6 +121,41 @@ disconnecting`.
 Each Unity project has its own plugin instance and its own token. Switching
 project = same procedure as a fresh bring-up (token will be different even
 on the same machine).
+
+### D. Tunnel hangs in "failed to dial quic" loop (⚠️ important)
+
+**Symptom:** `cloudflared tunnel --url ...` prints `Failed to dial a quic connection error="failed to dial to edge with quic: timeout: no recent network activity"` and never produces a working URL (or produces a URL that returns Cloudflare error 530 "Tunnel error").
+
+**Cause:** By default cloudflared uses **QUIC** (UDP/443) to reach the Cloudflare edge. Many environments — containers, CI runners, corporate VPNs, restricted firewalls — block outbound UDP on port 443. The tunnel control plane never comes up.
+
+**Fix:** Force HTTP/2 (TCP/443) which works anywhere outbound HTTPS works:
+
+```bash
+cloudflared tunnel --url http://localhost:<port> --protocol http2
+```
+
+`tools/start_tunnel.sh` in this repo already passes `--protocol http2` by default. If you wrote a one-off `cloudflared` invocation, add the flag manually.
+
+**Diagnostic:** look at `/tmp/cloudflared.log`. If you see `Initial protocol quic` followed by a chain of `ERR Failed to dial a quic connection` lines and never an `INF Registered tunnel connection` line, this is the issue.
+
+### E. Tunnel returns 530 "Tunnel error" with `--protocol http2`
+
+The control plane is up (you saw `INF Registered tunnel connection`), but requests through the URL return Cloudflare error 530.
+
+**Cause:** cloudflared can't reach the *origin* (your local server). Either:
+- The port is wrong (e.g. tunnel points to localhost:443 but container is on localhost:29422).
+- The scheme is wrong (e.g. tunnel uses `https://localhost:443` but the container speaks plain HTTP — you'll see 502 Bad Gateway). The unity-mcp-server container speaks plain HTTP, so always use `http://localhost:<port>`.
+- The container isn't actually running on that port (check with `docker ps`).
+
+**Diagnostic:** before publishing the URL to the user, smoke-test locally:
+```bash
+curl -i -X POST http://localhost:<port>/ \
+    -H "Authorization: Bearer <token>" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"devin","version":"1.0"}}}'
+```
+If this returns `HTTP/1.1 200 OK` with `Mcp-Session-Id`, the origin is healthy and the issue is in cloudflared config. If this returns a connection-refused, fix the container first.
 
 ## Common errors
 
