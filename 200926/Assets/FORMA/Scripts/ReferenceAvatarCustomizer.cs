@@ -1,0 +1,320 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Forma
+{
+    /// <summary>
+    /// Runtime-редактор загруженного референс-аватара (ригованный GLB из RigModels
+    /// или статичный OBJ). Правит кости рига, материалы по имени (кожа/волосы/одежда),
+    /// морфы и видимость частей; управляет анимациями через ReferenceAvatarLoader.
+    /// Все регуляторы дёргаются панелью FORMA (ApplyFromParameters) и локальной панелью.
+    /// </summary>
+    public class ReferenceAvatarCustomizer : MonoBehaviour
+    {
+        [Range(0.8f, 1.2f)] public float height = 1f;
+        [Range(0.8f, 1.2f)] public float width = 1f;
+        [Range(0.8f, 1.2f)] public float shoulder = 1f;
+        [Range(0.8f, 1.2f)] public float waist = 1f;
+        [Range(0.8f, 1.2f)] public float head = 1f;
+        [Range(0f, 1f)] public float skinWarmth = 0.55f;
+        [Range(0f, 1f)] public float hairDarkness = 0.35f;
+        public bool showHair = true;
+        public bool showClothes = true;
+        public bool showAccessories = true;
+        public bool showEditorUi = true;
+
+        // Тинты материалов (белый = без изменений). Ставятся панелью FORMA из свотчей.
+        public Color skinTint = Color.white;
+        public Color hairTint = Color.white;
+        public Color clothTint = Color.white;
+
+        readonly Dictionary<Transform, Vector3> _baseScales = new Dictionary<Transform, Vector3>();
+        readonly Dictionary<SkinnedMeshRenderer, float[]> _baseWeights = new Dictionary<SkinnedMeshRenderer, float[]>();
+        readonly HashSet<Transform> _bones = new HashSet<Transform>();
+        Transform _loadedAvatar;
+        Vector3 _loadedBaseScale = Vector3.one;
+        readonly List<Material> _ownedMaterials = new List<Material>();
+        float _lastHeight = -1f, _lastWidth = -1f, _lastShoulder = -1f, _lastWaist = -1f, _lastHead = -1f;
+        int _lastRendererCount = -1;
+        ReferenceAvatarLoader _loader;
+
+        void Awake() { _loader = GetComponentInParent<ReferenceAvatarLoader>(); }
+
+        bool _proportionsDirty;
+
+        void Update()
+        {
+            var renderers = GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            var meshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+            SyncLoadedModel(meshRenderers);
+            if (renderers.Length != _lastRendererCount)
+            {
+                Cache(renderers);
+                _lastRendererCount = renderers.Length;
+                _proportionsDirty = true;
+            }
+            if (!Mathf.Approximately(_lastHeight, height)
+                || !Mathf.Approximately(_lastWidth, width)
+                || !Mathf.Approximately(_lastShoulder, shoulder)
+                || !Mathf.Approximately(_lastWaist, waist)
+                || !Mathf.Approximately(_lastHead, head))
+            {
+                _proportionsDirty = true;
+            }
+            ApplyVisibility(renderers);
+            ApplyMaterialTuning(renderers);
+            ApplyGenericMaterialTuning(meshRenderers);
+        }
+
+        // The Animator writes bone transforms during Update, so bone-level proportions
+        // (head / shoulders / waist / thighs) are re-applied after it, otherwise the
+        // playing clip would overwrite them and the sliders would look dead.
+        void LateUpdate()
+        {
+            if (_loadedAvatar == null) return;
+            bool animated = _loader != null && _loader.IsAnimated;
+            if (_proportionsDirty || animated)
+            {
+                ApplyProportions();
+                _proportionsDirty = false;
+            }
+        }
+
+        /// <summary>Мост из панели FORMA: параметры UI → регуляторы референс-аватара.</summary>
+        public void ApplyFromParameters(AvatarParams p)
+        {
+            if (p == null) return;
+            height = Mathf.Lerp(0.8f, 1.2f, p.height);
+            width = Mathf.Lerp(0.8f, 1.2f, p.build);
+            shoulder = Mathf.Lerp(0.8f, 1.2f, p.shoulders);
+            waist = Mathf.Lerp(0.8f, 1.2f, 1f - p.waist);
+            head = Mathf.Lerp(0.8f, 1.2f, p.headWidth);
+            hairDarkness = Mathf.Clamp01(1f - p.hairShine);
+
+            if (TryHex(p.skin)) skinTint = HexColor(p.skin);
+            if (TryHex(p.hairColor)) hairTint = HexColor(p.hairColor);
+            if (TryHex(p.upperColor)) clothTint = HexColor(p.upperColor);
+
+            ApplyModelScale();
+        }
+
+        static bool TryHex(string hex)
+        {
+            return !string.IsNullOrEmpty(hex) && ColorUtility.TryParseHtmlString(hex.StartsWith("#") ? hex : "#" + hex, out _);
+        }
+        static Color HexColor(string hex)
+        {
+            ColorUtility.TryParseHtmlString(hex.StartsWith("#") ? hex : "#" + hex, out var c);
+            return c;
+        }
+
+        void SyncLoadedModel(MeshRenderer[] renderers)
+        {
+            if (_loadedAvatar == null)
+            {
+                var go = transform.Find("FORMA Female Reference") ?? transform.Find("FORMA Male Reference");
+                if (go != null) { _loadedAvatar = go; _loadedBaseScale = go.localScale; }
+            }
+            ApplyModelScale();
+        }
+
+        void ApplyModelScale()
+        {
+            if (_loadedAvatar == null) return;
+            _loadedAvatar.localScale = new Vector3(_loadedBaseScale.x * width, _loadedBaseScale.y * height, _loadedBaseScale.z * width);
+        }
+
+        void Cache(SkinnedMeshRenderer[] renderers)
+        {
+            _baseScales.Clear();
+            _baseWeights.Clear();
+            _bones.Clear();
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                if (!_baseScales.ContainsKey(r.transform)) _baseScales.Add(r.transform, r.transform.localScale);
+                var weights = new float[r.sharedMesh != null ? r.sharedMesh.blendShapeCount : 0];
+                for (int i = 0; i < weights.Length; i++) weights[i] = r.GetBlendShapeWeight(i);
+                _baseWeights[r] = weights;
+
+                // Кости рига (RigModels: shoulderl, arm_stretchl, spine_01x, headx, thigh_stretchr…)
+                if (r.bones != null)
+                    foreach (var b in r.bones)
+                        if (b != null && _bones.Add(b) && !_baseScales.ContainsKey(b))
+                            _baseScales.Add(b, b.localScale);
+            }
+        }
+
+        void ApplyProportions()
+        {
+            _lastHeight = height; _lastWidth = width; _lastShoulder = shoulder;
+            _lastWaist = waist; _lastHead = head;
+
+            foreach (var item in _baseScales)
+            {
+                var bone = item.Key;
+                Vector3 s = item.Value;
+                if (bone == null) continue;
+                bool isRigBone = _bones.Contains(bone);
+                string n = bone.name.ToLowerInvariant();
+
+                float sx = width;
+                float sy = height;
+
+                if (isRigBone)
+                {
+                    // Кости рига: масштабируем только XZ — позы/анимации не трогаем.
+                    // Кееиворды под стандарт RigModels + запасные варианты.
+                    if (n.Contains("shoulder") || n.Contains("arm_stretch") || n.Contains("upperarm"))
+                        sx *= shoulder;
+                    if (n.Contains("spine_0") || n.Contains("chest") || n.Contains("pelvis") || n.Contains("hip") || n.Contains("waist"))
+                        sx *= waist;
+                    if (n.Contains("thigh") || n.Contains("leg_stretch") || n.Contains("calf"))
+                        sx *= Mathf.Lerp(width, shoulder, 0.5f);
+                    if (n.Contains("head") || n.Contains("neck"))
+                    {
+                        float hs = Mathf.Sqrt(head); // мягче: голова растёт по всем осям
+                        bone.localScale = new Vector3(s.x * hs, s.y * hs, s.z * hs);
+                        continue;
+                    }
+                    bone.localScale = new Vector3(s.x * sx, s.y, s.z * sx);
+                    continue;
+                }
+
+                // OBJ-режим / прочие трансформы рендереров (логика v10)
+                if (n.Contains("shoulder") || n.Contains("upperarm")) sx *= shoulder;
+                if (n.Contains("waist") || n.Contains("spine") || n.Contains("pelvis")) sx *= waist;
+                if (n.Contains("head") || n.Contains("face") || n.Contains("eye")) sx *= head;
+                bone.localScale = new Vector3(s.x * sx, s.y * sy, s.z * sx);
+            }
+
+            foreach (var item in _baseWeights)
+            {
+                var mesh = item.Key.sharedMesh;
+                if (mesh == null) continue;
+                for (int i = 0; i < item.Value.Length; i++)
+                {
+                    string n = mesh.GetBlendShapeName(i).ToLowerInvariant();
+                    float v = item.Value[i];
+                    if (n.Contains("muscl") || n.Contains("chest") || n.Contains("shoulder")) v *= Mathf.InverseLerp(0.8f, 1.2f, shoulder);
+                    if (n.Contains("waist") || n.Contains("belly") || n.Contains("fat")) v *= Mathf.InverseLerp(1.2f, 0.8f, waist);
+                    item.Key.SetBlendShapeWeight(i, Mathf.Clamp(v, 0f, 100f));
+                }
+            }
+        }
+
+        void ApplyVisibility(SkinnedMeshRenderer[] renderers)
+        {
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                string n = r.name.ToLowerInvariant();
+                if (n.Contains("hair") || n.Contains("lash")) r.enabled = showHair;
+                else if (n.Contains("cloth") || n.Contains("dress") || n.Contains("shirt") || n.Contains("pants")) r.enabled = showClothes;
+                else if (n.Contains("bracelet") || n.Contains("earring") || n.Contains("jewel") || n.Contains("accessor")) r.enabled = showAccessories;
+            }
+        }
+
+        // Тонировка по ИМЕНИ МАТЕРИАЛА: ригованные GLB — один меш с материалами
+        // body/face/hands | hair/lashes | cloth/dress/alpha/bracelet/earrings.
+        void ApplyMaterialTuning(SkinnedMeshRenderer[] renderers)
+        {
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                bool hairRenderer = r.name.ToLowerInvariant().Contains("hair");
+                foreach (var m in r.materials)
+                {
+                    if (m == null) continue;
+                    if (!_ownedMaterials.Contains(m)) _ownedMaterials.Add(m);
+                    string mn = m.name.ToLowerInvariant();
+                    bool isHair = hairRenderer || mn.Contains("hair") || mn.Contains("lash");
+                    bool isSkin = !isHair && (mn.Contains("body") || mn.Contains("face") || mn.Contains("hands") || mn.Contains("skin"));
+                    bool isCloth = !isHair && !isSkin && (mn.Contains("cloth") || mn.Contains("dress") || mn.Contains("alpha")
+                        || mn.Contains("outfit") || mn.Contains("skirt") || mn.Contains("top") || mn.Contains("pants")
+                        || mn.Contains("shoe") || mn.Contains("bracelet") || mn.Contains("earring"));
+
+                    if (isHair)
+                    {
+                        var c = Color.Lerp(new Color(.18f, .12f, .09f), new Color(.025f, .02f, .018f), hairDarkness);
+                        c = Color.Lerp(c, hairTint, 0.55f);
+                        SetTint(m, c);
+                    }
+                    else if (isSkin)
+                    {
+                        var c = Color.Lerp(Color.white, new Color(1f, skinWarmth, skinWarmth, 1f), 0.15f);
+                        c *= skinTint;
+                        SetTint(m, c);
+                    }
+                    else if (isCloth)
+                    {
+                        SetTint(m, clothTint == Color.white ? Color.white : Color.Lerp(Color.white, clothTint, 0.7f));
+                    }
+                }
+            }
+        }
+
+        void ApplyGenericMaterialTuning(MeshRenderer[] renderers)
+        {
+            foreach (var r in renderers)
+            {
+                if (r == null) continue;
+                foreach (var m in r.materials)
+                {
+                    if (m == null) continue;
+                    if (!_ownedMaterials.Contains(m)) _ownedMaterials.Add(m);
+                    var c = Color.Lerp(Color.white, new Color(1f, skinWarmth, skinWarmth, 1f), 0.15f) * skinTint;
+                    if (m.HasProperty("_Color")) m.SetColor("_Color", c);
+                    if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+                }
+            }
+        }
+
+        static void SetTint(Material m, Color c)
+        {
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+            else if (m.HasProperty("_Color")) m.SetColor("_Color", c);
+        }
+
+        void OnGUI()
+        {
+            if (!showEditorUi || !Application.isPlaying) return;
+            GUILayout.BeginArea(new Rect(Screen.width - 300, 18, 280, Screen.height - 36), GUI.skin.box);
+            GUILayout.Label("FORMA / AVATAR EDITOR");
+            height = Slider("Height", height, .8f, 1.2f);
+            width = Slider("Width", width, .8f, 1.2f);
+            shoulder = Slider("Shoulders", shoulder, .8f, 1.2f);
+            waist = Slider("Waist", waist, .8f, 1.2f);
+            head = Slider("Head", head, .8f, 1.2f);
+            hairDarkness = Slider("Hair darkness", hairDarkness, 0f, 1f);
+            showHair = GUILayout.Toggle(showHair, "Hair");
+            showClothes = GUILayout.Toggle(showClothes, "Clothes");
+            showAccessories = GUILayout.Toggle(showAccessories, "Accessories");
+
+            if (_loader == null) _loader = GetComponentInParent<ReferenceAvatarLoader>();
+            if (_loader != null && _loader.IsAnimated)
+            {
+                GUILayout.Space(8);
+                GUILayout.Label("ANIMATION");
+                int count = _loader.AnimationCount;
+                for (int i = 0; i < count; i++)
+                {
+                    var nm = _loader.AnimationName(i);
+                    if (!string.IsNullOrEmpty(nm) && GUILayout.Button(nm))
+                        _loader.PlayAnimation(i);
+                }
+                if (GUILayout.Button("Stop")) _loader.StopAnimation();
+            }
+
+            GUILayout.Label("Changes apply live to the loaded 3D model.");
+            GUILayout.EndArea();
+        }
+
+        static float Slider(string label, float value, float min, float max)
+        {
+            GUILayout.Label(label + "  " + value.ToString("0.00"));
+            return GUILayout.HorizontalSlider(value, min, max);
+        }
+    }
+}

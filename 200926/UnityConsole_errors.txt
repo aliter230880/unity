@@ -1,0 +1,49 @@
+Unity Console — ошибки компиляции (реальные строки из Editor.log, Windows)
+=============================================================================
+Unity: 6000.3.9f1 (7a9955a4f2fa), Render Pipeline: URP 17.3.0
+Проект: D:\Work\Unity\Projects\MAC_avatars (MAC = Magic Avatar Creator SDK)
+
+АКТУАЛЬНЫЕ ОШИБКИ ПРЯМО СЕЙЧАС (не исправлены, ждут вашего PR):
+----------------------------------------------------------------
+Assets\Editor\MAC_Forma_Probe.cs(216,9): error CS8803: Top-level statements must precede namespace and type declarations.
+Assets\Editor\MAC_Forma_Probe.cs(234,5): error CS1022: Type or namespace definition, or end-of-file expected
+Assets\Editor\MAC_Forma_Probe.cs(236,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(284,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(322,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(328,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(358,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(372,5): error CS0106: The modifier 'public' is not valid for this item
+Assets\Editor\MAC_Forma_Probe.cs(385,1): error CS1022: Type or namespace definition, or end-of-file expected
+Assets\Editor\MAC_Forma_Setup.cs(397,35): error CS0104: 'ShadowQuality' is an ambiguous reference between 'UnityEngine.ShadowQuality' and 'UnityEngine.Rendering.Universal.ShadowQuality'
+
+Диагноз по MAC_Forma_Probe.cs: внутри файла после строки ~216 методы оказались
+ВНЕ класса (класс закрылся раньше / top-level statement посередине файла) —
+нужно завернуть всё в один класс/неймспейс. MAC_Forma_Setup.cs: квалифицировать
+ShadowQuality (UnityEngine.Rendering.Universal.ShadowQuality или убрать using).
+
+ИСТОРИЧЕСКИЕ ОШИБКИ (уже ИСПРАВЛЕНЫ локально — для контекста, не повторяйте фиксы):
+------------------------------------------------------------------------------------
+1) Каскад CS0246 'AvatarData' (AvatarObject.cs(15,16), AvatarDataManager.cs(27,48), ...)
+   Причина: unitypackage FORMA содержал внутри запись
+   Assets/Magic Avatar Creator/Scripts/Core/AvatarData.cs + .meta, перезаписывавшую
+   SDK-файл укороченной заглушкой, а .meta приходил с мусорным префиксом «+» на каждой
+   строке (вставка diff-патча) — битый meta = скрипт вообще не импортируется.
+   Фикс: восстановлен полный AvatarData.cs (enum avatarType + SetBlendShapes/GetBlendShapes/
+   SetClothes/GetClothes/SetMaterialProperties/ApplyToMaterialManager/ToJson/FromJson),
+   meta очищен, GUID сохранён 5f0c2dafb7f22e84890d8d72644fb6da.
+2) CS1061 'Transform' does not contain 'AddComponent' (FormaStudioUI.cs / FormaStudio.cs)
+3) CS0019 enum == int (baseData.avatarType == 1) — сравнивать с MagicAvatarManager.AvatarType.*
+4) CS0246 'DestroyImmediate' в статическом методе — квалифицировать UnityEngine.Object.DestroyImmediate
+5) CS1526/CS1525 — двойной «>>» в new Dictionary<...,float[]>>()
+
+RUNTIME-ПРОБЛЕМЫ (уже исправлены локально):
+-------------------------------------------
+- Розовая подставка/материалы: Built-in шейдеры (FORMA/LitVertexColor, Standard) в URP
+  → FixFloorShader() + подмена на Universal Render Pipeline/Lit.
+- Аватар «застывал»: печённый AnimatorController без defaultState → теперь ставится.
+- Аватар пропадал: LODGroup с порогом 0.05 → LOD убран.
+
+ТЕКУЩЕЕ СОСТОЯНИЕ КОМПИЛЯЦИИ (проверено Roslyn-компилятором Unity 6000.3.9f1
+по ВСЕМ скриптам, кроме двух файлов MAC_Forma_*.cs выше): 0 ошибок.
+Скрипты FORMA (Assets/FORMA/Scripts, Assets/FORMA/Editor) и SDK MAC
+(Assets/MAC_Scripts) — чистые.
