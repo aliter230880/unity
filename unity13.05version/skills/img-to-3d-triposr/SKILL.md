@@ -29,11 +29,14 @@ per VM / snapshot. It:
 
 ## Usage
 
+### Mode 1 — fast vertex-color GLB (default)
+
 ```bash
 ./tools/img_to_3d.sh <input_image> [output_dir] [mc_resolution]
 ```
 
-Defaults: `output_dir=/tmp/triposr_out`, `mc_resolution=256`.
+Defaults: `output_dir=/tmp/triposr_out`, `mc_resolution=256`. Output:
+`<output_dir>/0/mesh.glb` (vertex colors, no PBR maps).
 
 ```bash
 ./tools/img_to_3d.sh ~/attachments/photo.png                # default 256
@@ -41,16 +44,64 @@ Defaults: `output_dir=/tmp/triposr_out`, `mc_resolution=256`.
 ./tools/img_to_3d.sh ~/attachments/photo.png /tmp/out 320   # higher detail
 ```
 
-Output: `<output_dir>/0/mesh.glb` (vertex colors, no PBR maps) plus
-`<output_dir>/0/input.png` (background-removed input).
-
 Approximate timings on 2-core CPU, no GPU:
 
-| mc-resolution | time | mesh size |
-|---|---|---|
-| 128 | ~25 s | ~170 KB |
-| 256 | ~45 s | ~700 KB |
-| 320 | ~80 s | ~1.2 MB |
+| mc-resolution | time | mesh size | notes |
+|---|---|---|---|
+| 128 | ~25 s | ~170 KB | quick preview, blocky |
+| 256 | ~45 s | ~700 KB | default — best speed/quality on 7-GB RAM |
+| 320 | ~80 s | ~1.2 MB | sharper, fits in 7 GB RAM only without --bake-texture |
+| 512 | ~5 min | ~5 MB | OOM on 7 GB RAM; needs 16+ GB |
+
+### Mode 2 — high-quality UV-textured OBJ + texture.png (recommended for human subjects)
+
+Vertex colors at 17–27k vertices give a blurry result — the photo's
+detail is averaged across triangles. **`--bake-texture` samples colors
+from the original photo into a UV-mapped texture atlas**, which Unity
+renders as a real PBR base-color map. The improvement on faces, skin,
+fabric is dramatic.
+
+```bash
+cd ~/TripoSR
+xvfb-run -a python3 run.py <input_image> \
+    --device cpu \
+    --output-dir /tmp/triposr_baked \
+    --mc-resolution 256 \
+    --bake-texture \
+    --texture-resolution 1024 \
+    --model-save-format obj
+```
+
+Output:
+- `/tmp/triposr_baked/0/mesh.obj` (≈ 4 MB)
+- `/tmp/triposr_baked/0/texture.png` (≈ 700 KB — a UV atlas with photo chunks)
+- `/tmp/triposr_baked/0/input.png` (background-removed input)
+
+Approximate timings on 2-core CPU:
+
+| mc-resolution + texture | time | result | RAM peak |
+|---|---|---|---|
+| 256 + 1024 | ~4 min | sharp UV-mapped | ~5 GB |
+| 256 + 2048 | ~6 min | very sharp | ~6.5 GB |
+| 320 + 2048 | OOM on 7 GB | — | crashes |
+
+**Convert OBJ + texture into a single GLB** (Unity prefers self-contained binary GLB over OBJ + MTL + PNG):
+
+```bash
+python3 << 'PY'
+import trimesh
+from PIL import Image
+import os
+out_dir = '/tmp/triposr_baked/0'
+mesh = trimesh.load(f'{out_dir}/mesh.obj', force='mesh', process=False)
+img = Image.open(f'{out_dir}/texture.png')
+material = trimesh.visual.material.PBRMaterial(baseColorTexture=img)
+mesh.visual = trimesh.visual.TextureVisuals(
+    uv=mesh.visual.uv, image=img, material=material)
+mesh.export(f'{out_dir}/mesh_textured.glb')
+print(f'GLB: {os.path.getsize(f"{out_dir}/mesh_textured.glb")} bytes')
+PY
+```
 
 ## Pipeline: image → Unity scene
 
@@ -93,18 +144,54 @@ Full flow combining this skill with `glb-import-to-unity` and
 - **TripoSR has no content filter** (it's just feedforward 3D
   reconstruction over open weights). Be careful when sharing the
   generated mesh / renders.
-- **`--bake-texture` is fragile in headless environments.** It uses
-  moderngl + EGL which may fail with `libGL.so not found`. Skip the
-  flag and use vertex colors unless EGL is confirmed working.
+- **`--bake-texture` needs an EGL context.** It uses moderngl + EGL
+  which fails with `libGL.so not found` on most headless VMs out of
+  the box. See "Setting up EGL for --bake-texture" below for the
+  exact apt packages + `xvfb-run` invocation that works.
+
+## Setting up EGL for `--bake-texture`
+
+Default apt packages for `libegl1` install only the SONAME files
+(`libGL.so.1`, `libEGL.so.1`), but glcontext (used by moderngl) does
+`dlopen("libGL.so")` without version suffix — which only exists in
+the `-dev` packages. Install the dev packages and add Xvfb:
+
+```bash
+sudo apt-get install -y \
+    xvfb libgl-dev libegl-dev libgles-dev libosmesa6-dev \
+    libgl1 libegl1 libegl1-mesa libgles2-mesa
+```
+
+Then run TripoSR under `xvfb-run` (provides a virtual X display):
+
+```bash
+xvfb-run -a python3 run.py <image> --bake-texture ...
+```
+
+Smoke-test EGL standalone:
+
+```bash
+xvfb-run -a python3 -c "
+import moderngl
+ctx = moderngl.create_context(standalone=True, backend='egl')
+print('EGL ok:', ctx.info.get('GL_VERSION'))
+"
+# Expected: EGL ok: 4.5 (Core Profile) Mesa <version>
+```
+
+If this prints `EGL ok: ...`, `--bake-texture` will work.
 
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |---|---|---|
 | `torchmcubes` import error | Repo not patched | Run `patch_triposr_cpu.sh` |
-| `libGL.so not found` | Bake-texture without EGL | Drop `--bake-texture` or install `libgl1 libegl1` |
-| OOM during mesh extraction | mc-resolution too high for RAM | Drop to 256 or 128 |
+| `libGL.so not loaded` (in moderngl) | Missing `-dev` symlinks | `sudo apt-get install libgl-dev libegl-dev libgles-dev libosmesa6-dev` |
+| `EGL context creation failed` | No X / EGL display | Wrap command in `xvfb-run -a ...` |
+| OOM during mesh extraction | mc-resolution too high for RAM | Drop to 256 or 128; if using `--bake-texture`, drop texture-resolution to 1024 |
+| OOM at start of `bake_texture` | Texture resolution too high | Texture 2048 needs ~7 GB; on 8-GB VMs use 1024 |
 | Output is just a blob | Input is non-object / not foreground-isolatable | Try a clearer reference image |
+| `xatlas.export()` writes only `.obj`, not `.glb` | TripoSR uses xatlas for textured output | Use the trimesh post-processing snippet above to repackage as GLB |
 
 ## Comparison with alternatives (as of 2026-05)
 
