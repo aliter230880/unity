@@ -1,106 +1,193 @@
-# AliTerra AI — Fullstack Unity Developer v7
+# MAC_avatars — текущий контекст (13.09.2026 01:37)
 
-## Архитектура системы
+## ИСПРАВЛЕНО 13.09.2026 — баги и лаги устранены
 
-```
-Unity Editor Plugin (AliTerraAI.cs)
-        │
-        ├─► POST /api/unity/sync ──────► Сервер хранит ВСЕ файлы проекта
-        ├─► POST /api/unity/push ──────► Состояние сцены (выбранный объект, иерархия)
-        ├─► POST /api/unity/logs ──────► Консольные логи Unity (errors/warnings)
-        ├─► GET  /api/unity/commands ──► Команды от AI (polling каждые 3 сек)
-        └─► POST /api/unity/commands ──► Отчёт о выполнении команд
-                │
-        POST /api/ai/chat ─────────────► Claude claude-sonnet-4-6 с Anthropic Tools
-```
+### Проблемы (были)
+1. **LateUpdate убивал Canvas каждый кадр** → лаги, тормоза UI
+2. **StyledAvatarCustomization конфликтовал** с MACCustomizationUI → дублирование логики
+3. **Чёрная панель появлялась дважды** → нативный UI не удалялся правильно
 
-## AI Tools (Function Calling)
+### Исправления
+1. **LateUpdate УДАЛЁН** — теперь нативный UI удаляется ОДНОКРАТНО в Run()
+2. **StyledAvatarCustomization.cs отключён** — компонент деактивируется автоматически при запуске MACCustomizationUI
+3. **RemoveNativeUI()** — новый метод, который однократно:
+   - Удаляет mainUIContainer нативного UIManager
+   - Скрывает все Canvas кроме MACCustomizationUI
+   - Устанавливает флаг _nativeUIRemoved для предотвращения повторного вызова
 
-AI использует инструменты вместо генерации кода в чат:
+### Резервная копия
+- Путь: `D:\Work\Unity\Projects\MAC_avatars\AI\backup-20260913-013147\`
+- Файлы: MACCustomizationUI.cs (старая версия с LateUpdate), StyledAvatarCustomization.cs (старая версия)
 
-| Инструмент | Действие |
-|------------|----------|
-| `list_project_files` | Просматривает все синхронизированные файлы |
-| `read_script(path)` | Читает содержимое файла |
-| `create_script(path, content)` | Создаёт файл → команда → плагин записывает |
-| `modify_script(path, content)` | Изменяет файл → команда → плагин записывает |
-| `create_game_object(name, primitive, ...)` | Создаёт объект в сцене |
-| `execute_editor_command(cmd)` | refresh, save_scene, compile, log_message |
-| `read_console_logs(type, limit)` | Читает логи Unity для отладки |
+---
 
-## Поток данных (v7)
+## Сцена
+`Assets/Scenes/AvatarCustomization_Styled.unity` — рабочая сцена. Один MAC-аватар справа (камера ~68%), тёмная панель кастомизации слева (~32%).
 
-```
-Пользователь: "Создай систему инвентаря"
-        ↓
-AI (claude-sonnet-4-6):
-  1. list_project_files → видит структуру проекта
-  2. read_script("Assets/Scripts/Player/PlayerController.cs") → читает код
-  3. create_script("Assets/Scripts/Inventory/InventorySystem.cs", fullCode)
-  4. create_script("Assets/Scripts/Inventory/Item.cs", fullCode)
-  5. execute_editor_command("refresh")
-  6. read_console_logs("error") → проверяет ошибки
-        ↓
-Плагин (polling):
-  - GET /api/unity/commands → получает команды write_file
-  - File.WriteAllText(path, content) → записывает файлы
-  - AssetDatabase.Refresh() → Unity видит файлы
-  - POST /api/unity/commands {success:true} → отчёт
-        ↓
-AI: "✅ Создал InventorySystem и Item. Ошибок нет."
-```
+## Главный UI
+`Assets/Scripts/MACCustomizationUI.cs` (~1200 строк) — автобут через `[RuntimeInitializeOnLoadMethod(AfterSceneLoad)]`, 6 вкладок: BODY / FACE / SKIN / HAIR / CLOTH / PRESET.
 
-## Компоненты
+### Ключевые фичи
 
-### API Server (`artifacts/api-server/`)
-- **Framework**: Express 5, TypeScript, esbuild
-- **AI**: Anthropic SDK (@anthropic-ai/sdk), claude-sonnet-4-6
-- **Port**: 8080 (proxy → /api)
-- **Store**: In-memory (store.ts) — файлы, команды, логи
+**Bindpose-retarget для волос и одежды:**
+- При применении причёски/одежды: `mesh = Instantiate(renderer.sharedMesh)` (клон), затем `bindposes[i] = macBone.worldToLocalMatrix * avatar.transform.localToWorldMatrix`.
+- Компенсирует ×100 масштаб и −90°X вращение предка MAC-аватара ("Male Avatar Base").
+- renderer.rootBone → CC_Base_Head, parent → голова; `updateWhenOffscreen = true`.
+- render queue одежды = 2225 (выше тела 2000) — убирает z-fighting и проглядывание тела.
 
-#### Роуты
-- `POST /api/ai/chat` — чат с AI + tools, multi-turn tool loop
-- `POST /api/unity/sync` — получить ВСЕ файлы проекта от плагина
-- `GET  /api/unity/commands` — команды для плагина (pending → sent)
-- `POST /api/unity/commands` — отчёт о выполнении команды
-- `POST /api/unity/logs` — консольные логи Unity
-- `GET  /api/unity/state` — текущее состояние подключения
-- `POST /api/unity/push` — legacy push состояния сцены
-- `GET  /api/unity/plugin` — скачать плагин с подставленным SERVER_URL
+**Камера — авто-зум по вкладкам:**
+- BODY/CLOTH/PRESET → BlendShapeType.Body (dist 1.85)
+- FACE/SKIN → BlendShapeType.Face (dist 0.27, крупный план лица)
+- HAIR → BlendShapeType.Head (dist 0.37)
+- Плавная интерполяция (0.5с, ease-out sine), сохраняет направление камеры.
 
-### Plugin (`plugin/AliTerraAI.cs`)
-- **Version**: v7
-- **Unity**: 2019+ / C# 7.3 (NO new() shorthand, NO target-typed new)
-- **Tabs**: 💬 Чат | 🔄 Fullstack | 📁 Файлы | 🔧 Debug
-- **Installation**: Assets/Editor/AliTerraAI.cs
-- **Menu**: Window → AliTerra → AI Coder (Ctrl+Shift+A)
+**Каталог волос:**
+- 11 CC-причёсок в `Resources/MACHair/`: Short_01, Bob_01, Afro_Short_01/02, Afro_Curl_01, Long_01_Masculine/Feminine, SidePart_01/02, Ponytail_01.
+- Кнопка «Remove Hair» — destroy instances.
 
-#### Новые функции v7
-- `StartFullSync()` — сканирует Assets/Packages/ProjectSettings, отправляет все текстовые файлы (≤350KB) на сервер
-- `PollCommandsRoutine()` — каждые 3 сек запрашивает команды, исполняет: write_file, create_gameobject, add_component, execute_editor_command
-- `FlushLogs()` — каждые 5 сек отправляет консольные логи Unity на сервер
-- `OnLogMessage()` — перехватчик Application.logMessageReceived
-- Вкладка "🔄 Fullstack" — кнопка синхронизации, toggle polling, лог команд
+**Каталог одежды:**
+- `Resources/MACClothing/` — полный CC-каталог: 8 M upper,7 M lower,12 F upper,8 F lower.
+- Фильтр по полу: M↔F переключает каталог, снимает предыдущий preview.
+- Кнопки «Remove Upper»/«Remove Lower» (импортированные) + «Remove UPPER/LOWER/FULL» (нативные MAC).
 
-### Web Inspector (`artifacts/aliterra-inspector/`)
-- React + Vite, путь: /
+**Панель — ресурсы UI_select:**
+- Roboto-Bold/Regular SDF из `Resources/MACUI/Fonts/` — все TMP тексты.
+- UI_Blank.PNG (кнопки Sliced), UI_Border_Thin.PNG (панели Sliced), T_thumb_default.PNG (слайдеры).
+- `Resources.Load<Sprite/TMP_FontAsset>` в Run(), fallback на дефолтный шрифт.
 
-### DB (`lib/db/`)
-- PostgreSQL + Drizzle ORM (для будущего использования)
+### Стабильность
+- Динамический резолв: `MM()` → текущий AvatarMaterialsManager, `HM()` → текущий MagicHairManager, `var cur = _mgr?.CurrentAvatar` в каждом колбэке — MissingReference при свитче M↔F не возникает.
+- `RebuildAfterSwitch` — Destroy старых import-инстансов, пересборка всех 6 вкладок, ForceUpdateCanvases, ShowTab(_activeTab) с камерой.
 
-## Стек AliTerra (Unity проект)
-- Unity 2022.3 LTS
-- C# 7.3+ (Unity 2019+ совместимость)
-- Photon Fusion (мультиплеер)
-- Thirdweb SDK (Web3/NFT/блокчейн)
-- Ready Player Me (аватары)
-- Convai (AI NPC)
-- PHP/Node.js backend
+## Runtime-каталоги
+- `Assets/Resources/MACHair/` — 11 причёсок CC.
+- `Assets/Resources/MACClothing/` — ~35 предметов одежды CC (полный каталог M+F).
+- `Assets/Resources/MACUI/Fonts/` — Roboto-Bold/Regular SDF.
+- `Assets/Resources/MACUI/Sprites/` — UI_Blank, UI_Border_Thin, T_thumb_default, UI_Scrollbar, UI_Arrow.
 
-## Replit домен
-https://44c604d5-cbad-400c-8af7-eb2443eadba0-00-3vtnrupat6ost.riker.replit.dev
+## Статус
+- ✅ Скрипты исправлены и скомпилированы (13.09.2026)
+- ⏳ **ТРЕБУЕТСЯ PLAY-ТЕСТ**: запустить сцену и проверить:
+  1. Нет лагов UI (LateUpdate удалён)
+  2. Чёрная панель появляется только ОДНА (слева)
+  3. Bindpose-retarget (причёски на голове, одежда по фигуре)
+  4. Камера (зум лица на FACE/SKIN)
+  5. Каталог (кнопки загружают префабы)
+  6. Смена M↔F без MissingRef
 
-## GitHub репозиторий
-https://github.com/aliter230880/unity
-- `plugin/AliTerraAI.cs` — master plugin
-- `CONTEXT.md` — эта документация
+## Известные ограничения
+- Import-одежда ≠ ClothElement: нет displacement mask, нет blendshape sync. Нативная MAC-одежда работает полноценно.
+- Remove Upper/Lower для import-одежды — destroy ALL imported (нет отслеживания upper vs lower по инстансу).
+- Roboto SDF .asset может не загрузиться из Resources если внутренние ссылки на atlas texture сломаны — fallback на LiberationSans SDF.
+
+## Следующие шаги
+1. **Play-тест** — проверить все исправления в действии
+2. Если всё работает — обновить README с инструкциями
+3. Улучшить Remove Upper/Lower (трекать слот import-инстанса)
+
+
+---
+
+## Обновление 16.09.2026 — панель в сцене another_mac (рабочее состояние)
+
+### Что сделано
+- Сцена `another_mac`: убран посторонний оверлей `MAC_UI_Root` и мусорный `MAC_UI_CameraDefaultPose`,
+  на объект `/MAC_Customization_UI` включён компонент `MACCustomizationUI`. Сцена сохранена.
+- `Assets/Scripts/MACCustomizationUI.cs` перестроен:
+  - левый рельс категорий BODY / FACE / SKIN / HAIR / CLOTH / PRESET вместо строки вкладок;
+  - полоса чипов секций — **20 страниц**, активна ровно одна;
+  - нижняя панель RANDOM / RESET / BACK / NEXT;
+  - цвета — свачи + H/S/V для тонкой подстройки;
+  - оформление: тёмная база + золотой акцент, скругления и градиент генерируются в рантайме;
+  - свободный зум колесом мыши 0.35…6.0 вдобавок к принудительной наводке по вкладке;
+  - камера принадлежит панели (`LateUpdate`) — клик больше не проваливает её сквозь тело.
+
+### Исправленные баги
+1. Страницы секций **всех** вкладок оставались активными и были прозрачными — просвечивали
+   друг через друга и перехватывали ввод. Теперь активна ровно одна страница из 20.
+2. «Remove Top» удалял и низ одежды (общий список) — списки верх/низ разделены.
+3. У бегунка слайдера была **высота 0** — ползунки выглядели как прогресс-бары без ручки.
+4. Длинные имена параметров вылезали из колонки — обрезка с «…».
+5. Камера: нативный `UIManager` на каждый клик ЛКМ переставлял `Camera.main` по мировой оси +Z.
+   Камера переведена под контроль панели, направление орбиты хранится своё.
+
+### Проверено (факты, не «на глаз»)
+- Компиляция чистая; `[MAC] UI READY`; 164 слайдера, 6 категорий, 20 страниц.
+- Переключение вкладок `0:0 / 1:2 / 2:0 / 3:0 / 4:0 / 5:0` — всегда **1 активная страница**.
+- Камера: эмуляция нативного «кликового» перескока не сдвигает камеру (позиция идентична).
+- Зум: 1.20 достигается, 0.05 зажимается до 0.35 — камера не входит в голову.
+
+### Не проверено / дальше
+- Реальные клики и колесо мыши (проверялось через мост к редактору).
+- Секции HAIR → PRESETS / COLOR пусты, если в сцене нет `MagicHairManager`.
+- Следующее по визуалу: иконки в рельсе, превью-миниатюры причёсок и одежды,
+  подсветка/виньетка под персонажем.
+
+### Бэкапы
+`AI/backup-20260916-messfix/` — сцена и версии `MACCustomizationUI.cs` до каждого шага:
+`.bak`, `.pre-redesign`, `.pre-visual`, `.pre-bugfix`, `.pre-visual2`, `.pre-camera`.
+
+### Рабочий инструмент проверки
+`Assets/Editor/MAC_AI_Shot.cs` (в проект добавлен 16.09.2026) — снимки Game View,
+дамп структуры панели, переключение вкладок без мыши, проба камеры. Не часть игры.
+
+
+---
+
+## Обновление 16.09.2026 (вечер) — камера, свет, ползунки, причёски
+
+### Что сделано
+- **Камера принадлежит панели.** Нативный `UIManager` продолжает работать после скрытия своего UI
+  и на каждый клик ЛКМ переставлял `Camera.main` в `focusPos.z + _currentCameraDistance`
+  (мировая ось +Z) — камера «проваливалась сквозь тело». Теперь камера ведётся из `LateUpdate`
+  (после `Update`), направление орбиты своё, поэтому клик её не сдвигает.
+- **Направление орбиты зафиксировано на +Z** — сторона, с которой смотрит сам SDK. Раньше
+  направление бралось из текущей позы камеры, и можно было получить вид со спины.
+- **Свободный зум колесом мыши**, диапазон 0.35…6.0, вдобавок к принудительной наводке по вкладке.
+  Ограничение дистанции применяется в момент применения, а не только там, где пишет колесо.
+- **Освещение спереди.** В сцене активен только контровой `Point Right_Front` (Directional,
+  Y=214.7°), поэтому аватар читался тёмным спереди. Панель создаёт рантайм-источник
+  `MAC_FrontFill` между камерой и аватаром, чуть выше фокуса, без теней, и ведёт его за кадром.
+- **Нижняя панель** RANDOM / RESET / BACK / NEXT, **свачи** для цветов, **рельс** категорий.
+- Вкладка **HAIR больше не пустая**: `STYLES` — 11 причёсок + Remove Hair; `COLOR` — «Hair color»
+  (свачи + H/S/V) и «Shine», работают по материалам напрямую, если в сцене нет
+  `MagicHairManager`; пустая секция `PRESETS` при этом не создаётся.
+
+### Исправленные баги
+1. Страницы секций **всех** вкладок оставались активными и прозрачными — просвечивали друг через
+   друга и перехватывали ввод. Теперь активна ровно одна страница.
+2. «Remove Top» удалял и низ одежды (общий список) — списки верх/низ разделены.
+3. У бегунка слайдера была **высота 0** — ползунки читались как прогресс-бары без ручки.
+4. **Фон строки параметра был 14 px вместо 555** — дочерний объект попадал в поток
+   `HorizontalLayoutGroup`. Лечится `LayoutElement.ignoreLayout = true`.
+5. Длина ползунков: тянущейся была подпись, и она выдавливала дорожку в огрызок. Теперь подпись
+   фиксированная (148), значение 46, дорожка тянется — замер **341 из 555 (61 % строки)**.
+6. Камера, свет и направление обзора — см. выше.
+7. Длинные имена параметров вылезали из колонки — обрезка с «…».
+
+### Проверено (факты, не «на глаз»)
+- Компиляция чистая; `[MAC] UI READY`; 164 слайдера, 6 категорий, 20 страниц.
+- Переключение вкладок `0:0 / 1:2 / 2:0 / 3:0 / 4:0 / 5:0` — всегда **1 активная страница**.
+- Камера: эмуляция нативного «кликового» перескока (`UIManager.UpdateCameraPosition(0)`)
+  не сдвигает камеру — позиция до и после идентична.
+- Зум: 1.20 достигается, 0.05 зажимается до 0.35.
+- Свет: `MAC_FrontFill` существует; на кадре крупным планом «лицо хорошо освещено, черты видны».
+- Размеры строки: подпись 148.0 / значение 46.0 / дорожка 341.2 при строке 555.2.
+
+### ОТКРЫТЫЙ ДЕФЕКТ: причёски не видны на аватаре
+- Клик срабатывает: `[MAC] Hair: Hair_Short_01`, инстанс корректно привязан под `CC_Base_Head`.
+- Но голова остаётся лысой (подтверждено на кадре крупным планом, несколько прогонов).
+- Инстанс в мире стоит **у ног**: локальный Y от кости головы = −1.50.
+- Удаление `LODGroup` у инстанса + принудительное включение рендереров **не помогло**.
+- Часть причёсок не применяется вовсе: `Hair_Long_01_Feminine: bone long_01A` — кости нет в риге.
+- Версия (кандидат, НЕ подтверждена): префабы `Resources/MACHair/*` собраны под другой скелет
+  (похоже на GameBase), аватар в сцене — на `CC_Base`; bindpose-retarget не даёт результата.
+  Следующий шаг — сверить с `AvatarCustomization_Styled.unity`, где причёски работали.
+
+### Бэкапы
+`AI/backup-20260916-messfix/` — сцена и версии `MACCustomizationUI.cs` до каждого шага:
+`.bak`, `.pre-redesign`, `.pre-visual`, `.pre-visual2`, `.pre-visual3`, `.pre-bugfix`, `.pre-camera`.
+
+### Инструмент проверки
+`Assets/Editor/MAC_AI_Shot.cs` — снимки Game View, дамп подписей, переключение вкладок без мыши,
+нажатие кнопок по подписи, замер строки параметра, проба камеры/зума. Не часть игры.
