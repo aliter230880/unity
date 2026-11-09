@@ -1,58 +1,34 @@
-# FORMA + MAC — материалы для веб-ИИ (GitHub)
+# FORMA + MAC — Unity 6 project
 
-Распакованное содержимое unitypackage `FORMA_Editable_Realistic_NO_GLTFast_v10.unitypackage`
-в его **текущем исправленном** виде + минимальный скелет Unity-проекта + текст ошибок консоли.
+## Supported editor and dependencies
 
-## Структура
+- Unity **6000.3.9f1**
+- Universal Render Pipeline **17.3.0**
+- glTFast **6.10.0**
 
-```
-для ВЭБ_ИИ/
-├── Assets/
-│   ├── FORMA/                  ← сам пакет FORMA v10 (со всеми .meta, GUID сохранены)
-│   │   ├── Scripts/            ← 15 скриптов (см. ниже) — ГЛАВНОЕ для ревью
-│   │   │   ├── Backends/       ← архитектура IAvatarBackend (4 новых файла)
-│   │   │   ├── FormaStudio.cs          — панель FORMA (IMGUI), роутинг бэкендов
-│   │   │   ├── MacAvatarAdapter.cs     — MAC-бэкенд: биндинг-таблица, Capture, слепки
-│   │   │   ├── ReferenceAvatarLoader.cs / ReferenceAvatarCustomizer.cs — GLB/OBJ путь
-│   │   │   └── ...                      — генератор/билдеры процедурного аватара
-│   │   ├── Editor/             ← FormaGlbAnimBaker (пекарь контроллеров),
-│   │   │                          FormaBindingWindow (калибровка), FormaMenu, TextureFix
-│   │   ├── Scenes/FORMA_Studio.unity   — сцена (YAML; ссылки: MAC Avatar Adapter +
-│   │   │                                   префабы MaleAvatarDefault/FemaleAvatarDefault)
-│   │   ├── Resources/FORMA/    ← OBJ-референсы + текстуры + Bases/*.asset
-│   │   ├── Sources/            ← MaleAnimated.glb / FemaleAnimated.glb (БИНАРЬ ~23МБ,
-│   │   │                          ригованные персонажи RigModels + анимации;
-│   │   │                          для проверки компиляции НЕ нужны, можно не грузить)
-│   │   ├── Materials/, Shaders/
-│   ├── MAC_Scripts/            ← Assets/Magic Avatar Creator/Scripts из SDK MAC
-│   │                              (нужно для компиляции: namespace MagicAvatarCreator:
-│   │                              MagicAvatarManager, AvatarObject, AvatarData,
-│   │                              AvatarMaterialsManager, ClothElement, ...)
-│   ├── MAC_Prefabs_Avatars/    ← 4 префаба-основ MAC (YAML; их GUID-ы стоят в сцене;
-│   │                              ссылаются на FBX-меши, которых здесь НЕТ —
-│   │                              на компиляцию не влияет, будут missing mesh)
-│   └── Editor/                 ← MAC_Forma_Probe.cs / MAC_Forma_Setup.cs —
-│                                  ВАШИ файлы, сейчас с ошибками компиляции (см. errors.txt)
-├── Packages/manifest.json      ← зависимости: URP 17.3.0 + com.unity.cloud.gltfast 6.10.0
-├── ProjectSettings/ProjectVersion.txt ← Unity 6000.3.9f1
-└── UnityConsole_errors.txt     ← реальные ошибки консоли + история + диагноз
-```
+Open the repository root folder `200926` as the Unity project. Unity Package Manager restores the dependencies declared in `Packages/manifest.json`.
 
-## Ключевая архитектура (что уже сделано, не ломайте)
+## First import
 
-- `IAvatarBackend` (Apply/Capture/SetSex/Hide) — единый контракт источника аватаров.
-- `MacAvatarAdapter` — MAC-бэкенд на таблице-данных `FormaMacBinding` (ScriptableObject:
-  paramId + shapeNames + AnimationCurve response + templateLadder; зеркальные _L/_R
-  пары пишутся синхронно; шаблоны Ears_T1..T7 интерполируются лестницей; кейворды — фолбэк).
-  Плюс Capture() (аватар→параметры) и DumpShapes/ApplyDump (100% round-trip образов).
-- `MacContentCatalog` — таблицы «стиль FORMA → CC-префаб» для волос/одежды.
-- `FormaStudio` — MAC-режим по умолчанию, тумблер «Аватары: MAC», образы с macShapeDump.
-- Известные грабли unitypackage: НЕ включайте в пакет файлы из
-  `Assets/Magic Avatar Creator/**` (однажды это перезаписало AvatarData.cs кривым
-  diff-патчем — каскад CS0246 по всему SDK; детали в errors.txt).
+1. Open `Assets/FORMA/Scenes/FORMA_Studio.unity`.
+2. Wait for the GLB assets under `Assets/FORMA/Sources` to finish importing through glTFast.
+3. Run **FORMA → Bake GLB Animations** (or **Tools → FORMA → Setup Reference Avatars**).
+4. Confirm that Unity created `Assets/FORMA/Resources/FORMA/FemaleAnimated.prefab` and `MaleAnimated.prefab`.
+5. Enter Play mode.
 
-## Что просится в ваш PR
+The baker creates a controller with a default state for each imported GLB, then writes the generated prefabs into `Resources/FORMA`, which is the path used by `ReferenceAvatarLoader`.
 
-Исправить два своих файла (`Assets/Editor/MAC_Forma_Probe.cs`, `MAC_Forma_Setup.cs`) —
-точные ошибки и диагноз в `UnityConsole_errors.txt`. Больше в проекте ошибок компиляции нет
-(проверено Roslyn по всем скриптам, кроме этих двух).
+## What is included
+
+- `Assets/FORMA/Sources/FemaleAnimated.glb` and `MaleAnimated.glb`
+- FORMA scripts, scene, resources, materials and editor utilities
+- MAC adapter scripts and avatar prefabs
+- Unity package manifest and version settings
+
+## Limitations to verify locally
+
+This repository does not include every mesh dependency referenced by the supplied MAC prefabs. The FORMA scene defaults to the MAC mode when those MAC assets are available, and the GLB workflow can be selected through the FORMA UI. Verify the scene in Unity after package restoration: GitHub cannot execute Unity or validate rendering, asset import, or Play mode.
+
+## Do not use the legacy FBX setup
+
+The old FBX/Rigged setup was removed from the editor entry point because the project uses GLB source avatars. Use the bake command above; it is repeatable and safe to run after reimporting either GLB file.
