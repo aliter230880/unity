@@ -7,9 +7,9 @@
 #   1. Ставит CPU-сборку PyTorch.
 #   2. Ставит остальные python-зависимости TripoSR + PyMCubes
 #      (заменитель torchmcubes без требования CUDA).
-#   3. Ставит системные libGL / EGL библиотеки (нужны опционально, для
-#      --bake-texture; без них генерация всё равно работает, но без
-#      запеканием текстур).
+#   3. Ставит системные libGL/EGL библиотеки + Xvfb (нужны для
+#      --bake-texture, в т.ч. дев-версии для libGL.so/libEGL.so
+#      symlink'ов — без них moderngl падает в "libGL.so not loaded").
 #   4. Клонирует https://github.com/VAST-AI-Research/TripoSR.git в ~/TripoSR.
 #   5. Патчит tsr/models/isosurface.py — fallback на PyMCubes когда
 #      torchmcubes (CUDA only) недоступен.
@@ -27,9 +27,16 @@ pip install --quiet omegaconf einops transformers==4.45.2 trimesh \
     "rembg[cpu]" onnxruntime huggingface-hub xatlas==0.0.9 \
     imageio[ffmpeg] moderngl PyMCubes Pillow
 
-echo "[patch_triposr_cpu] 3/4 System libs (libGL/EGL for moderngl)"
+echo "[patch_triposr_cpu] 3/4 System libs (libGL/EGL for moderngl + Xvfb for headless)"
 if command -v sudo >/dev/null 2>&1; then
-    sudo apt-get install -y libgl1 libegl1 libegl1-mesa libgles2-mesa >/dev/null || true
+    # Runtime libs:
+    sudo apt-get install -y libgl1 libegl1 libegl1-mesa libgles2-mesa libosmesa6 >/dev/null || true
+    # -dev packages provide the unversioned libGL.so / libEGL.so symlinks
+    # that glcontext (used by moderngl) dlopens. Without them you'll see
+    # "libGL.so not loaded" from moderngl even though libGL.so.1 exists.
+    sudo apt-get install -y libgl-dev libegl-dev libgles-dev libosmesa6-dev >/dev/null || true
+    # Xvfb to provide a virtual X display for the EGL context.
+    sudo apt-get install -y xvfb >/dev/null || true
 fi
 
 echo "[patch_triposr_cpu] 4/4 Clone + patch TripoSR"
